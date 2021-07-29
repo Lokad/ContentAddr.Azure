@@ -1,0 +1,42 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0</TargetFrameworks>
+    <AssemblyName>Lokad.ContentAddr.Azure</AssemblyName>
+    <RuntimeIdentifiers>win</RuntimeIdentifiers>
+    <OutputType>Library</OutputType>
+    <Company>Lokad</Company>
+    <Copyright>Copyright © Lokad 2021</Copyright>
+
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0</FileVersion>
+    <PackageId>Lokad.ContentAddr.Azure</PackageId>
+    <PackageVersion>1.0.0</PackageVersion>
+    <LangVersion>7.2</LangVersion>
+    <Version>1.0.0</Version>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageIcon>lokad.png</PackageIcon>
+    <PackageProjectUrl>https://github.com/Lokad/ContentAddr.Azure</PackageProjectUrl>
+    <Description>Azure Blob Storage support for Lokad.ContentAddr</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lokad.ContentAddr" Version="1.0.0" />
+    <PackageReference Include="Microsoft.Azure.Storage.Blob" Version="9.4.1" />
+    <PackageReference Include="System.Memory" Version="4.5.4" />
+    <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE.txt">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
+    <None Include="..\lokad.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+    </None>
+  </ItemGroup>
+  
+</Project>
