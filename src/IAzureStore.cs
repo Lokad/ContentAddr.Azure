@@ -24,6 +24,6 @@ namespace Lokad.ContentAddr.Azure
         Task<IAzureReadBlobRef> CommitTemporaryBlob(string name, CancellationToken cancel);
         Task ArchiveBlobAsync(IAzureReadBlobRef blob);
         IAzureReadBlobRef GetAzureArchiveBlob(Hash hash);
-        Task<Boolean> TryUnArchiveBlobAsync(Hash hash);
+        Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash);
     }
 }

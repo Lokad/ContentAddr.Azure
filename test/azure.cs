@@ -88,7 +88,7 @@ namespace Lokad.ContentAddr.Tests
             Assert.Equal(suffix, url.Substring(url.Length - suffix.Length));
         }
 
-        [Fact]
+        [Fact(Skip = "Execute manually")]
         public async Task archive_step_one_azure()
         {
             var file = FakeFile(1024);
@@ -108,7 +108,7 @@ namespace Lokad.ContentAddr.Tests
             await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
         }
 
-        [Fact]
+        [Fact(Skip = "Execute manually")]
         public async Task archive_step_two_azure()
         {
             var store = (AzureStore)Store;

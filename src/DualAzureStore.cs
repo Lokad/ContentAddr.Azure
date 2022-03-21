@@ -46,9 +46,9 @@ namespace Lokad.ContentAddr.Azure
         public IAzureReadBlobRef GetAzureArchiveBlob(Hash hash) =>
            _newStore.GetAzureArchiveBlob(hash);
 
-        public async Task<Boolean> TryUnArchiveBlobAsync(Hash hash)
+        public async Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash)
         {
-            return false;
+            return UnArchiveStatus.Done;
         }
 
         /// <see cref="IStore{TBlobRef}.StartWriting"/>
