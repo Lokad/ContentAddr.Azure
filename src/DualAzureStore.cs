@@ -32,9 +32,23 @@ namespace Lokad.ContentAddr.Azure
             CloudBlobContainer oldPersistent,
             CloudBlobContainer newPersistent,
             CloudBlobContainer staging,
+            CloudBlobContainer archive,
             AzureWriter.OnCommit onCommit = null) : base(realm, oldPersistent, newPersistent)
         {
-            _newStore = new AzureStore(realm, newPersistent, staging, onCommit);
+            _newStore = new AzureStore(realm, newPersistent, staging, archive, onCommit);
+        }
+
+        public async Task ArchiveBlobAsync(IAzureReadBlobRef blob)
+        {
+
+        }
+
+        public IAzureReadBlobRef GetAzureArchiveBlob(Hash hash) =>
+           _newStore.GetAzureArchiveBlob(hash);
+
+        public async Task<Boolean> TryUnArchiveBlobAsync(Hash hash)
+        {
+            return false;
         }
 
         /// <see cref="IStore{TBlobRef}.StartWriting"/>

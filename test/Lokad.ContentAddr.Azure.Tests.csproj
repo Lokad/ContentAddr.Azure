@@ -17,11 +17,26 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\..\..\test_env\ContentAddr.Azure\test\azure_connection.txt">
+      <Link>azure_connection.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\..\test_env\ContentAddr.Azure\test\azure_dual_connection.txt">
+      <Link>azure_dual_connection.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
     <None Update="azure_connection.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="azure_dual_connection.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Condition=" '$(EnableDefaultCompileItems)' == 'true' " Update="azure.cs">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Compile>
   </ItemGroup>
 </Project>

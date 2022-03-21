@@ -22,5 +22,8 @@ namespace Lokad.ContentAddr.Azure
         /// <param name="name"> The full name of the temporary blob. </param>
         /// <param name="cancel"> Cancellation token. </param>
         Task<IAzureReadBlobRef> CommitTemporaryBlob(string name, CancellationToken cancel);
+        Task ArchiveBlobAsync(IAzureReadBlobRef blob);
+        IAzureReadBlobRef GetAzureArchiveBlob(Hash hash);
+        Task<Boolean> TryUnArchiveBlobAsync(Hash hash);
     }
 }

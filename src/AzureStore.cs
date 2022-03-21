@@ -1,9 +1,12 @@
 ﻿using Microsoft.WindowsAzure.Storage.Blob;
+using Microsoft.WindowsAzure.Storage;
 using System;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using System.IO.Compression;
+using System.Collections.Generic;
 
 namespace Lokad.ContentAddr.Azure
 {
@@ -21,21 +24,27 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> The container where temporary blobs are staged for a short while. </summary>
         private CloudBlobContainer Staging { get; }
 
+        /// <summary> The container where archived blobs are stored. </summary>
+        private CloudBlobContainer Archive { get; }
+
         /// <param name="realm"> <see cref="AzureReadOnlyStore"/> </param>
         /// <param name="persistent"> 
         ///     Blobs are stored here, named according to 
         ///     <see cref="AzureReadOnlyStore.AzureBlobName"/>.
         /// </param>
         /// <param name="staging"> Temporary blobs are stored here. </param>
+        /// <param name="archive"> Archived blobs are stored here. </param>
         /// <param name="onCommit"> Called when a blob is committed. </param>
         public AzureStore(
             string realm,
             CloudBlobContainer persistent,
             CloudBlobContainer staging,
+            CloudBlobContainer archive,
             AzureWriter.OnCommit onCommit = null) : base(realm, persistent)
         {
             _onCommit = onCommit;
             Staging = staging;
+            Archive = archive;
         }
 
         /// <see cref="IStore{TBlobRef}.StartWriting"/>
@@ -69,6 +78,92 @@ namespace Lokad.ContentAddr.Azure
             });
 
             return new Uri(blob.Uri.AbsoluteUri + token);
+        }
+
+        public async Task ArchiveBlobAsync(IAzureReadBlobRef blob)
+        {
+            var aBlob = await blob.GetBlob();
+            var destinationCloudBlockBlob = Archive.GetBlockBlobReference(aBlob.Name);
+
+            using (var azureWriteStream = await destinationCloudBlockBlob.OpenWriteAsync(CancellationToken.None))
+            {
+                using (var gzStream = new GZipStream(azureWriteStream, CompressionMode.Compress))
+                {
+                    using (var azureReadStream = await blob.OpenAsync(CancellationToken.None))
+                    {
+                        await azureReadStream.CopyToAsync(gzStream);
+                    }
+                }
+            }
+            await destinationCloudBlockBlob.SetStandardBlobTierAsync(StandardBlobTier.Archive);
+        }
+
+        public IAzureReadBlobRef GetAzureArchiveBlob(Hash hash) =>
+            new AzureBlobRef(Realm, hash, Archive.GetBlockBlobReference(AzureBlobName(Realm, hash)));
+
+        public async Task<Boolean> TryUnArchiveBlobAsync(Hash hash)
+        {
+            // we check if the archived blob exists
+            var aBlobRef = Archive.GetBlockBlobReference(AzureBlobName(Realm, hash));
+            if (await aBlobRef.ExistsAsync(null, null, CancellationToken.None))
+            {
+                // we check if UnArchive was already done successfully : if blob exists in Persistent
+                var pBlobRef = Persistent.GetBlockBlobReference(AzureBlobName(Realm, hash));
+                if (await pBlobRef.ExistsAsync(null, null, CancellationToken.None))
+                {
+                    Console.WriteLine("Blob already in Persistent");
+                    return true;
+                } else
+                {
+                    var sBlobRef = Staging.GetBlockBlobReference(AzureBlobName(Realm, hash));
+                    // We check if Blob is already copied in Staging
+                    if (await sBlobRef.ExistsAsync(null, null, CancellationToken.None))
+                    {
+                        Console.WriteLine("Blob already copied in Staging");
+                        // We check which status it has
+                        if(sBlobRef.Properties.StandardBlobTier == StandardBlobTier.Hot)
+                        {
+                            Console.WriteLine("Blob already copied and rehydrated in Staging");
+                            // copy compressed blob to persistent
+                            IAzureReadBlobRef commitedBlobRef = await CommitTemporaryBlob(sBlobRef.Name, CancellationToken.None);
+                            CloudBlockBlob commitedBlob = await commitedBlobRef.GetBlob();
+                            // decompressing compressed blob
+                            using (var azureReadStream = await commitedBlobRef.OpenAsync(CancellationToken.None))
+                            {
+                                using (var gzStream = new GZipStream(azureReadStream, CompressionMode.Decompress))
+                                {
+                                    using (var azureWriteStream = await commitedBlob.OpenWriteAsync(CancellationToken.None))
+                                    {
+                                        await gzStream.CopyToAsync(azureWriteStream);
+                                    }
+                                }
+                            }
+                            return true;
+                        } else
+                        {
+                            Console.WriteLine("Waiting for rehydratation");
+                        }
+                    } else
+                    {
+                        Console.WriteLine("Blob not already copied in Staging");
+                        var oc = new OperationContext();
+                        oc.SendingRequest += (s, e) =>
+                        {
+                            if (e.Request.Headers.Contains("x-ms-access-tier"))
+                            {
+                                e.Request.Headers.Remove("x-ms-access-tier");
+                            }
+                            e.Request.Headers.Add("x-ms-access-tier", "Hot");
+                            e.Request.Headers.Add("x-ms-version", "2021-04-10");
+                            Console.WriteLine(e.Request.ToString());
+                            Console.WriteLine(e.Request.Headers.ToString());
+                        };
+                        await sBlobRef.StartCopyAsync(aBlobRef, null, null, null, oc, CancellationToken.None);
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary> Commit a blob from staging to the persistent store. </summary>

@@ -25,6 +25,7 @@ namespace Lokad.ContentAddr.Tests
         protected CloudBlobContainer OldPersistContainer;
         protected CloudBlobContainer NewPersistContainer;
         protected CloudBlobContainer StagingContainer;
+        protected CloudBlobContainer ArchiveContainer;
 
         protected string TestPrefix;
 
@@ -44,7 +45,10 @@ namespace Lokad.ContentAddr.Tests
             StagingContainer = NewClient.GetContainerReference(TestPrefix + "-staging");
             StagingContainer.CreateIfNotExists();
 
-            Store = new DualAzureStore("a", OldPersistContainer, NewPersistContainer, StagingContainer);
+            ArchiveContainer = NewClient.GetContainerReference(TestPrefix + "-archive");
+            ArchiveContainer.CreateIfNotExists();
+
+            Store = new DualAzureStore("a", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer);
         }
 
         public void Dispose()
@@ -113,9 +117,9 @@ namespace Lokad.ContentAddr.Tests
         {
             var file = FakeFile(2048);
             var hash = Md5(file);
-            var store = new DualAzureStore("b", OldPersistContainer, NewPersistContainer, StagingContainer);
-            var reverseStore = new DualAzureStore("b", NewPersistContainer, OldPersistContainer, StagingContainer);
-            var newBlobStore = new AzureStore("b", NewPersistContainer, StagingContainer);
+            var store = new DualAzureStore("b", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer);
+            var reverseStore = new DualAzureStore("b", NewPersistContainer, OldPersistContainer, StagingContainer, ArchiveContainer);
+            var newBlobStore = new AzureStore("b", NewPersistContainer, StagingContainer, ArchiveContainer);
 
             await reverseStore.WriteAsync(file, CancellationToken.None);
             var a = store[hash];
