@@ -30,9 +30,7 @@ namespace Lokad.ContentAddr.Tests
         {
             var account = CloudStorageAccount.Parse(Connection);
             Client = account.CreateCloudBlobClient();
-            TestPrefix = "f65ea9a6-15f8-4a1d-a0cd-b45cb00b9b6e";
-            //TestPrefix = "4502502d-7e52-4c35-9c68-e278d9b090fd";
-            //TestPrefix = Guid.NewGuid().ToString();
+            TestPrefix = Guid.NewGuid().ToString();
 
             PersistContainer = Client.GetContainerReference(TestPrefix + "-persist");
             PersistContainer.CreateIfNotExists();
@@ -89,7 +87,7 @@ namespace Lokad.ContentAddr.Tests
         }
 
         [Fact(Skip = "Execute manually")]
-        public async Task archive_step_one_azure()
+        public async Task archive_azure()
         {
             var file = FakeFile(1024);
             var hash = Md5(file);
@@ -106,13 +104,17 @@ namespace Lokad.ContentAddr.Tests
             await store.ArchiveBlobAsync(a);
             await aBlob.DeleteAsync();
             await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
-        }
 
-        [Fact(Skip = "Execute manually")]
-        public async Task archive_step_two_azure()
-        {
-            var store = (AzureStore)Store;
-            await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
+            Boolean finished = false;
+            while (!finished)
+            {
+                UnArchiveStatus status = await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
+                if (status == UnArchiveStatus.Done)
+                    break;
+                else if (status == UnArchiveStatus.Rehydrating)
+                    Console.WriteLine("Blob still rehydrating");
+                Thread.Sleep(3000);
+            }
         }
 
         [Fact]
