@@ -48,8 +48,8 @@ namespace Lokad.ContentAddr.Tests
 
         public void Dispose()
         {
-            //try { PersistContainer.DeleteIfExists(); } catch { }
-            //try { StagingContainer.DeleteIfExists(); } catch { }
+            try { PersistContainer.DeleteIfExists(); } catch { }
+            try { StagingContainer.DeleteIfExists(); } catch { }
         }
 
         [Fact]
@@ -110,7 +110,11 @@ namespace Lokad.ContentAddr.Tests
             {
                 UnArchiveStatus status = await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
                 if (status == UnArchiveStatus.Done)
-                    break;
+                {
+                    var a2 = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+                    Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", a2.Hash.ToString());
+                    finished = true;
+                }
                 else if (status == UnArchiveStatus.Rehydrating)
                     Console.WriteLine("Blob still rehydrating");
                 Thread.Sleep(3000);

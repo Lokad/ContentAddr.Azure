@@ -145,7 +145,7 @@ namespace Lokad.ContentAddr.Azure
                     using (var gzStream = new GZipStream(azureReadStream, CompressionMode.Decompress))
                     {
                         WrittenBlob wBlob = await this.WriteAsync(gzStream, CancellationToken.None);
-                        if(wBlob.Hash.ToString() != hash.ToString())
+                        if(!wBlob.Hash.Equals(hash))
                             throw new Exception("Unarchive of '" + sBlob.Name + "' failed (hashes don't match)");
                     }
                 }
