@@ -86,6 +86,8 @@ namespace Lokad.ContentAddr.Azure
             return new Uri(blob.Uri.AbsoluteUri + token);
         }
 
+        /// <summary> Compress a blob into the archive container and set its tier to "archive" in Azure. </summary>
+        /// <param name="blob"> The blob to be archived. </param>
         public async Task ArchiveBlobAsync(IAzureReadBlobRef blob)
         {
             var aBlob = await blob.GetBlob();
@@ -107,6 +109,15 @@ namespace Lokad.ContentAddr.Azure
         public IAzureReadBlobRef GetAzureArchiveBlob(Hash hash) =>
             new AzureBlobRef(Realm, hash, Archive.GetBlockBlobReference(AzureBlobName(Realm, hash)));
 
+        /// <summary>
+        ///     UnArchive a blob. It's a long process split into several steps. First step is to move
+        ///     the archived blob to the staging container and ask for its rehydratation.
+        /// </summary>
+        /// <remarks>
+        ///     Rehydratation can take several hours, so come later and call this function again
+        ///     to perform decompression into the persistent container.
+        /// </remarks>
+        /// <param name="hash"> The hash of the archived blob to be unarchived. </param>
         public async Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash)
         {
             // we check if the archived blob exists
