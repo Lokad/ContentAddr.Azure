@@ -112,7 +112,10 @@ namespace Lokad.ContentAddr.Tests
                 if (status == UnArchiveStatus.Done)
                 {
                     var a2 = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
-                    Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", a2.Hash.ToString());
+                    var a2Blob = await a2.GetBlob();
+                    var stream = new AzureReadStream(a2Blob, file.Length);
+                    foreach (var @byte in file)
+                        Assert.Equal(@byte, stream.ReadByte());
                     finished = true;
                 }
                 else if (status == UnArchiveStatus.Rehydrating)
