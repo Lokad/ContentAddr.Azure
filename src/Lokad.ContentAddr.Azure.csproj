@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0</TargetFrameworks>
@@ -23,14 +23,11 @@
 
   <ItemGroup>
     <PackageReference Include="Lokad.ContentAddr" Version="1.0.0" />
+    <PackageReference Include="Microsoft.Azure.Storage.Blob" Version="9.4.1" />
     <PackageReference Include="System.Memory" Version="4.5.4" />
     <PackageReference Include="System.ValueTuple" Version="4.5.0" />
-    <PackageReference Include="Microsoft.Azure.Storage.Blob" Version="9.4.1" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Remove="Microsoft.Azure.Storage.Blob" />
-  </ItemGroup>
   <ItemGroup>
     <None Include="..\LICENSE.txt">
       <Pack>True</Pack>

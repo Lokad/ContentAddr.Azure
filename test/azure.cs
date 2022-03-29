@@ -86,7 +86,7 @@ namespace Lokad.ContentAddr.Tests
             Assert.Equal(suffix, url.Substring(url.Length - suffix.Length));
         }
 
-        [Fact(Skip = "Execute manually")]
+        [Fact()]
         public async Task archive_azure()
         {
             var file = FakeFile(1024);
@@ -120,7 +120,7 @@ namespace Lokad.ContentAddr.Tests
                 }
                 else if (status == UnArchiveStatus.Rehydrating)
                     Console.WriteLine("Blob still rehydrating");
-                Thread.Sleep(3000);
+                Thread.Sleep(180000);
             }
         }
 
