@@ -1,12 +1,21 @@
 ﻿using Microsoft.WindowsAzure.Storage.Blob;
+using Microsoft.WindowsAzure.Storage;
 using System;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
+using System.IO.Compression;
+using System.Collections.Generic;
 
 namespace Lokad.ContentAddr.Azure
 {
+    public enum UnArchiveStatus
+    {
+        DoesNotExist,
+        Rehydrating,
+        Done
+    }
     /// <summary> Persistent content-addressable store backed by Azure blobs. </summary>
     /// <see cref="AzureReadOnlyStore"/>
     /// <remarks>
@@ -21,21 +30,27 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> The container where temporary blobs are staged for a short while. </summary>
         private CloudBlobContainer Staging { get; }
 
+        /// <summary> The container where archived blobs are stored. </summary>
+        private CloudBlobContainer Archive { get; }
+
         /// <param name="realm"> <see cref="AzureReadOnlyStore"/> </param>
         /// <param name="persistent"> 
         ///     Blobs are stored here, named according to 
         ///     <see cref="AzureReadOnlyStore.AzureBlobName"/>.
         /// </param>
         /// <param name="staging"> Temporary blobs are stored here. </param>
+        /// <param name="archive"> Archived blobs are stored here. </param>
         /// <param name="onCommit"> Called when a blob is committed. </param>
         public AzureStore(
             string realm,
             CloudBlobContainer persistent,
             CloudBlobContainer staging,
+            CloudBlobContainer archive,
             AzureWriter.OnCommit onCommit = null) : base(realm, persistent)
         {
             _onCommit = onCommit;
             Staging = staging;
+            Archive = archive;
         }
 
         /// <see cref="IStore{TBlobRef}.StartWriting"/>
@@ -69,6 +84,89 @@ namespace Lokad.ContentAddr.Azure
             });
 
             return new Uri(blob.Uri.AbsoluteUri + token);
+        }
+
+        /// <summary> Compress a blob into the archive container and set its tier to "archive" in Azure. </summary>
+        /// <param name="blob"> The blob to be archived. </param>
+        public async Task ArchiveBlobAsync(IAzureReadBlobRef blob)
+        {
+            var aBlob = await blob.GetBlob();
+            var destinationCloudBlockBlob = Archive.GetBlockBlobReference(aBlob.Name);
+
+            using (var azureWriteStream = await destinationCloudBlockBlob.OpenWriteAsync(CancellationToken.None))
+            {
+                using (var gzStream = new GZipStream(azureWriteStream, CompressionMode.Compress))
+                {
+                    using (var azureReadStream = await blob.OpenAsync(CancellationToken.None))
+                    {
+                        await azureReadStream.CopyToAsync(gzStream);
+                    }
+                }
+            }
+            await destinationCloudBlockBlob.SetStandardBlobTierAsync(StandardBlobTier.Archive);
+        }
+
+        public IAzureReadBlobRef GetAzureArchiveBlob(Hash hash) =>
+            new AzureBlobRef(Realm, hash, Archive.GetBlockBlobReference(AzureBlobName(Realm, hash)));
+
+        /// <summary>
+        ///     UnArchive a blob. It's a long process split into several steps. First step is to move
+        ///     the archived blob to the staging container and ask for its rehydratation.
+        /// </summary>
+        /// <remarks>
+        ///     Rehydratation can take several hours, so come later and call this function again
+        ///     to perform decompression into the persistent container.
+        /// </remarks>
+        /// <param name="hash"> The hash of the archived blob to be unarchived. </param>
+        public async Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash)
+        {
+            // we check if the archived blob exists
+            var aBlob = Archive.GetBlockBlobReference(AzureBlobName(Realm, hash));
+            if (!(await aBlob.ExistsAsync(null, null, CancellationToken.None)))
+                return UnArchiveStatus.DoesNotExist;
+
+            // we check if UnArchive was already done successfully : if blob exists in Persistent
+            var pBlob = Persistent.GetBlockBlobReference(AzureBlobName(Realm, hash));
+            if (await pBlob.ExistsAsync(null, null, CancellationToken.None))
+                return UnArchiveStatus.Done;
+            
+            var sBlob = Staging.GetBlockBlobReference(AzureBlobName(Realm, hash));
+            // We check if Blob is already copied in Staging
+            if (await sBlob.ExistsAsync(null, null, CancellationToken.None))
+            {
+                // We check which status it has
+                if (sBlob.Properties.StandardBlobTier != StandardBlobTier.Hot)
+                    return UnArchiveStatus.Rehydrating;
+
+                var destinationCloudBlockBlob = Persistent.GetBlockBlobReference(sBlob.Name);
+                // decompressing compressed blob into Persistent
+                using (var azureReadStream = await sBlob.OpenReadAsync(CancellationToken.None))
+                {
+                    using (var gzStream = new GZipStream(azureReadStream, CompressionMode.Decompress))
+                    {
+                        WrittenBlob wBlob = await this.WriteAsync(gzStream, CancellationToken.None);
+                        if(!wBlob.Hash.Equals(hash))
+                            throw new Exception("Unarchive of '" + sBlob.Name + "' failed (hashes don't match)");
+                    }
+                }
+                return UnArchiveStatus.Done;
+            }
+            // if blob not already copied in Staging,
+            // copy it by using a newer API version that
+            // deal with unarchiving at the same time
+            var oc = new OperationContext();
+            oc.SendingRequest += (s, e) =>
+            {
+                if (e.Request.Headers.Contains("x-ms-access-tier"))
+                {
+                    e.Request.Headers.Remove("x-ms-access-tier");
+                }
+                e.Request.Headers.Add("x-ms-access-tier", "Hot");
+                e.Request.Headers.Add("x-ms-version", "2021-04-10");
+            };
+            await sBlob.StartCopyAsync(aBlob, null, null, null, oc, CancellationToken.None);
+            
+            return UnArchiveStatus.Rehydrating;
         }
 
         /// <summary> Commit a blob from staging to the persistent store. </summary>

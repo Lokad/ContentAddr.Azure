@@ -21,6 +21,9 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> New persistent blob container. </summary>
         private readonly CloudBlobContainer _newPersist;
 
+        /// <summary> Staging blob container. </summary>
+        private readonly CloudBlobContainer _archive;
+
         /// <summary> Container prefix, if in testing. </summary>
         private readonly string _testPrefix;
 
@@ -38,6 +41,7 @@ namespace Lokad.ContentAddr.Azure
         {
             var persistName = testPrefix == null ? "persist" : testPrefix + "-persist";
             var stagingName = testPrefix == null ? "staging" : testPrefix + "-staging";
+            var archiveName = testPrefix == null ? "archive" : testPrefix + "-archive";
 
             _testPrefix = testPrefix;
             BlobClient = newClient;
@@ -51,6 +55,9 @@ namespace Lokad.ContentAddr.Azure
                 _staging = newClient.GetContainerReference(stagingName);
                 if (!_staging.Exists())
                     _staging.CreateIfNotExistsAsync().Wait();
+                _archive = newClient.GetContainerReference(archiveName);
+                if (!_archive.Exists())
+                    _archive.CreateIfNotExistsAsync().Wait();
             }
 
         }
@@ -61,7 +68,7 @@ namespace Lokad.ContentAddr.Azure
             if (_staging == null)
                 throw new InvalidOperationException("Cannot use 'ForAccount' in read-only mode.");
 
-            return new DualAzureStore(account.ToString(CultureInfo.InvariantCulture), _oldPersist, _newPersist, _staging, OnCommit);
+            return new DualAzureStore(account.ToString(CultureInfo.InvariantCulture), _oldPersist, _newPersist, _staging, _archive, OnCommit);
         }
 
         /// <see cref="IStoreFactory.this"/>

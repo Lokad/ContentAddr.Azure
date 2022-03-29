@@ -22,6 +22,8 @@ namespace Lokad.ContentAddr.Tests
 
         protected CloudBlobContainer StagingContainer;
 
+        protected CloudBlobContainer ArchiveContainer;
+
         protected string TestPrefix;
 
         public azure()
@@ -36,7 +38,10 @@ namespace Lokad.ContentAddr.Tests
             StagingContainer = Client.GetContainerReference(TestPrefix + "-staging");
             StagingContainer.CreateIfNotExists();
 
-            Store = new AzureStore("a", PersistContainer, StagingContainer,
+            ArchiveContainer = Client.GetContainerReference(TestPrefix + "-archive");
+            ArchiveContainer.CreateIfNotExists();
+
+            Store = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer,
                 (elapsed, realm, hash, size, existed) =>
                     Console.WriteLine("[{4}] {0} {1}/{2} {3} bytes", existed ? "OLD" : "NEW", realm, hash, size, elapsed));
         }
@@ -79,6 +84,44 @@ namespace Lokad.ContentAddr.Tests
 
             var suffix = "&sp=r&rsct=application%2Foctet-stream&rscd=attachment%3Bfilename%3D\"test.bin\"";
             Assert.Equal(suffix, url.Substring(url.Length - suffix.Length));
+        }
+
+        [Fact()]
+        public async Task archive_azure()
+        {
+            var file = FakeFile(1024);
+            var hash = Md5(file);
+            var store = (AzureStore)Store;
+
+            Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", hash.ToString());
+
+            var r = await store.WriteAsync(file, CancellationToken.None);
+            Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", r.Hash.ToString());
+            Assert.Equal(1024, r.Size);
+
+            var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+            var aBlob = await a.GetBlob();
+            await store.ArchiveBlobAsync(a);
+            await aBlob.DeleteAsync();
+            await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
+
+            Boolean finished = false;
+            while (!finished)
+            {
+                UnArchiveStatus status = await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
+                if (status == UnArchiveStatus.Done)
+                {
+                    var a2 = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+                    var a2Blob = await a2.GetBlob();
+                    var stream = new AzureReadStream(a2Blob, file.Length);
+                    foreach (var @byte in file)
+                        Assert.Equal(@byte, stream.ReadByte());
+                    finished = true;
+                }
+                else if (status == UnArchiveStatus.Rehydrating)
+                    Console.WriteLine("Blob still rehydrating");
+                Thread.Sleep(180000);
+            }
         }
 
         [Fact]
@@ -139,8 +182,9 @@ namespace Lokad.ContentAddr.Tests
 
             var persistContainer = Client.GetContainerReference("contentdisposition-persist");
             var stagingContainer = Client.GetContainerReference("contentdisposition-staging");
+            var archiveContainer = Client.GetContainerReference("contentdisposition-archive");
 
-            var store = new AzureStore("a", persistContainer, stagingContainer);
+            var store = new AzureStore("a", persistContainer, stagingContainer, archiveContainer);
 
             var blob = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var url = await blob.GetDownloadUrlAsync(
