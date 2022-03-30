@@ -38,19 +38,6 @@ namespace Lokad.ContentAddr.Azure
             _newStore = new AzureStore(realm, newPersistent, staging, archive, onCommit);
         }
 
-        public async Task ArchiveBlobAsync(IAzureReadBlobRef blob)
-        {
-
-        }
-
-        public IAzureReadBlobRef GetAzureArchiveBlob(Hash hash) =>
-           _newStore.GetAzureArchiveBlob(hash);
-
-        public async Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash)
-        {
-            return UnArchiveStatus.Done;
-        }
-
         /// <see cref="IStore{TBlobRef}.StartWriting"/>
         public StoreWriter StartWriting() =>
             _newStore.StartWriting();

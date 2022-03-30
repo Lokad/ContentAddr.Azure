@@ -4,6 +4,7 @@ using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Blob;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -99,29 +100,35 @@ namespace Lokad.ContentAddr.Tests
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", r.Hash.ToString());
             Assert.Equal(1024, r.Size);
 
+            // Archive the blob
             var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
-            var aBlob = await a.GetBlob();
             await store.ArchiveBlobAsync(a);
+
+            // Delete the blob
+            var aBlob = await a.GetBlob();
             await aBlob.DeleteAsync();
+
+            // Restore the blob from archive
             await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
 
-            Boolean finished = false;
-            while (!finished)
+            // Unarchiving takes a while...
+            while (true)
             {
                 UnArchiveStatus status = await store.TryUnArchiveBlobAsync(new Hash("B2EA9F7FCEA831A4A63B213F41A8855B"));
                 if (status == UnArchiveStatus.Done)
-                {
-                    var a2 = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
-                    var a2Blob = await a2.GetBlob();
-                    var stream = new AzureReadStream(a2Blob, file.Length);
-                    foreach (var @byte in file)
-                        Assert.Equal(@byte, stream.ReadByte());
-                    finished = true;
-                }
-                else if (status == UnArchiveStatus.Rehydrating)
-                    Console.WriteLine("Blob still rehydrating");
-                Thread.Sleep(180000);
+                    break;
+
+                if (status == UnArchiveStatus.Rehydrating)
+                    Trace.WriteLine("Blob still rehydrating");
+
+                Thread.Sleep(TimeSpan.FromMinutes(3));
             }
+
+            // Check blob contents are identical.
+            var a2 = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+            var stream = await a2.OpenAsync(default);
+            foreach (var @byte in file)
+                Assert.Equal(@byte, stream.ReadByte());
         }
 
         [Fact]

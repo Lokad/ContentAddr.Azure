@@ -1,12 +1,11 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
-using Microsoft.WindowsAzure.Storage;
+﻿using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
 using System;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
-using System.IO.Compression;
-using System.Collections.Generic;
 
 namespace Lokad.ContentAddr.Azure
 {
@@ -88,26 +87,26 @@ namespace Lokad.ContentAddr.Azure
 
         /// <summary> Compress a blob into the archive container and set its tier to "archive" in Azure. </summary>
         /// <param name="blob"> The blob to be archived. </param>
-        public async Task ArchiveBlobAsync(IAzureReadBlobRef blob)
+        public async Task ArchiveBlobAsync(IAzureReadBlobRef blob, CancellationToken cancel = default)
         {
             var aBlob = await blob.GetBlob();
             var destinationCloudBlockBlob = Archive.GetBlockBlobReference(aBlob.Name);
 
-            using (var azureWriteStream = await destinationCloudBlockBlob.OpenWriteAsync(CancellationToken.None))
+            if (await destinationCloudBlockBlob.ExistsAsync(cancel)) return;
+
+            using (var azureWriteStream = await destinationCloudBlockBlob.OpenWriteAsync(cancel))
             {
                 using (var gzStream = new GZipStream(azureWriteStream, CompressionMode.Compress))
                 {
-                    using (var azureReadStream = await blob.OpenAsync(CancellationToken.None))
+                    using (var azureReadStream = await blob.OpenAsync(cancel))
                     {
                         await azureReadStream.CopyToAsync(gzStream);
                     }
                 }
             }
-            await destinationCloudBlockBlob.SetStandardBlobTierAsync(StandardBlobTier.Archive);
-        }
 
-        public IAzureReadBlobRef GetAzureArchiveBlob(Hash hash) =>
-            new AzureBlobRef(Realm, hash, Archive.GetBlockBlobReference(AzureBlobName(Realm, hash)));
+            await destinationCloudBlockBlob.SetStandardBlobTierAsync(StandardBlobTier.Archive, cancel);
+        }
 
         /// <summary>
         ///     UnArchive a blob. It's a long process split into several steps. First step is to move
@@ -118,44 +117,47 @@ namespace Lokad.ContentAddr.Azure
         ///     to perform decompression into the persistent container.
         /// </remarks>
         /// <param name="hash"> The hash of the archived blob to be unarchived. </param>
-        public async Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash)
+        public async Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash, CancellationToken cancel = default)
         {
-            // we check if the archived blob exists
-            var aBlob = Archive.GetBlockBlobReference(AzureBlobName(Realm, hash));
-            if (!(await aBlob.ExistsAsync(null, null, CancellationToken.None)))
-                return UnArchiveStatus.DoesNotExist;
+            var blobName = AzureBlobName(Realm, hash);
 
             // we check if UnArchive was already done successfully : if blob exists in Persistent
-            var pBlob = Persistent.GetBlockBlobReference(AzureBlobName(Realm, hash));
-            if (await pBlob.ExistsAsync(null, null, CancellationToken.None))
+            var pBlob = Persistent.GetBlockBlobReference(blobName);
+            if (await pBlob.ExistsAsync(null, null, cancel))
                 return UnArchiveStatus.Done;
-            
-            var sBlob = Staging.GetBlockBlobReference(AzureBlobName(Realm, hash));
+
             // We check if Blob is already copied in Staging
-            if (await sBlob.ExistsAsync(null, null, CancellationToken.None))
+            var sBlob = Staging.GetBlockBlobReference(blobName);
+            if (await sBlob.ExistsAsync(null, null, cancel))
             {
                 // We check which status it has
                 if (sBlob.Properties.StandardBlobTier != StandardBlobTier.Hot)
                     return UnArchiveStatus.Rehydrating;
 
-                var destinationCloudBlockBlob = Persistent.GetBlockBlobReference(sBlob.Name);
                 // decompressing compressed blob into Persistent
-                using (var azureReadStream = await sBlob.OpenReadAsync(CancellationToken.None))
+                using (var azureReadStream = await sBlob.OpenReadAsync(cancel))
                 {
                     using (var gzStream = new GZipStream(azureReadStream, CompressionMode.Decompress))
                     {
-                        WrittenBlob wBlob = await this.WriteAsync(gzStream, CancellationToken.None);
-                        if(!wBlob.Hash.Equals(hash))
-                            throw new Exception("Unarchive of '" + sBlob.Name + "' failed (hashes don't match)");
+                        var wBlob = await this.WriteAsync(gzStream, default);
+                        if (!wBlob.Hash.Equals(hash))
+                            throw new InvalidOperationException($"Unarchiving {sBlob.Name} produces incorrect hash {hash}");
                     }
                 }
+
                 return UnArchiveStatus.Done;
             }
+
+            // we check if the archived blob exists
+            var aBlob = Archive.GetBlockBlobReference(blobName);
+            if (!(await aBlob.ExistsAsync(null, null, cancel)))
+                return UnArchiveStatus.DoesNotExist;
+
             // if blob not already copied in Staging,
             // copy it by using a newer API version that
             // deal with unarchiving at the same time
             var oc = new OperationContext();
-            oc.SendingRequest += (s, e) =>
+            oc.SendingRequest += (_, e) =>
             {
                 if (e.Request.Headers.Contains("x-ms-access-tier"))
                 {
@@ -164,8 +166,8 @@ namespace Lokad.ContentAddr.Azure
                 e.Request.Headers.Add("x-ms-access-tier", "Hot");
                 e.Request.Headers.Add("x-ms-version", "2021-04-10");
             };
-            await sBlob.StartCopyAsync(aBlob, null, null, null, oc, CancellationToken.None);
-            
+            await sBlob.StartCopyAsync(aBlob, null, null, null, oc, cancel);
+
             return UnArchiveStatus.Rehydrating;
         }
 
@@ -175,7 +177,7 @@ namespace Lokad.ContentAddr.Azure
         /// </remarks>
         /// <param name="name"> The full name of the temporary blob. </param>
         /// <param name="cancel"> Cancellation token. </param>
-        public async Task<IAzureReadBlobRef> CommitTemporaryBlob(string name, CancellationToken cancel) 
+        public async Task<IAzureReadBlobRef> CommitTemporaryBlob(string name, CancellationToken cancel)
         {
             var sw = Stopwatch.StartNew();
 

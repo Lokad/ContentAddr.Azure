@@ -12,7 +12,6 @@ namespace Lokad.ContentAddr.Azure
     /// </remarks>
     public interface IAzureStore : IAzureReadOnlyStore, IStore<IAzureReadBlobRef>
     {
-
         Uri GetSignedUploadUrl(string name, TimeSpan life);
 
         /// <summary> Commit a blob from staging to the persistent store. </summary>
@@ -22,8 +21,5 @@ namespace Lokad.ContentAddr.Azure
         /// <param name="name"> The full name of the temporary blob. </param>
         /// <param name="cancel"> Cancellation token. </param>
         Task<IAzureReadBlobRef> CommitTemporaryBlob(string name, CancellationToken cancel);
-        Task ArchiveBlobAsync(IAzureReadBlobRef blob);
-        IAzureReadBlobRef GetAzureArchiveBlob(Hash hash);
-        Task<UnArchiveStatus> TryUnArchiveBlobAsync(Hash hash);
     }
 }
