@@ -6,7 +6,7 @@ the base Lokad.ContentAddr library.
 
 ## Data Layout 
 
-This creates two containers in the Azure Blob Storage account: 
+This creates three containers in the Azure Blob Storage account: 
 
  - `persist` will contain the persistent blobs, named `<realm>/<hash>` (for instance, a
     blob `AC03061D6376491889AE7B1D6661AC94` in realm `85055` would be named 
@@ -15,6 +15,12 @@ This creates two containers in the Azure Blob Storage account:
  - `staging` will contain temporary blobs as they are being uploaded to
    the content-addressable store. This container can be safely emptied without
    losing any committed data.
+
+ - `archive` follows the same naming scheme as the persistent blobs, and will 
+    contain any persistent blobs that are moved to the archived storage tier 
+    in order to reduce costs. It is expected that blobs in this container
+    contain the gzipped version of the persistent blobs, to further reduce
+    the size and therefore the costs. 
 
 This library supports two upload models for uploading blobs:
 
