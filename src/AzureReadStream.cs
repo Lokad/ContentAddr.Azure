@@ -1,4 +1,5 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using System;
 using System.IO;
 using System.Threading;
@@ -27,7 +28,7 @@ namespace Lokad.ContentAddr.Azure
     public sealed class AzureReadStream : Stream
     {
         /// <summary> Read data from this blob. </summary>
-        private readonly CloudBlob _blob;
+        private readonly BlobClient _blob;
 
         /// <summary> The current position within the blob. </summary>
         private long _position;
@@ -54,7 +55,7 @@ namespace Lokad.ContentAddr.Azure
         /// </remarks>
         private int _bufferEnd;
 
-        public AzureReadStream(CloudBlob blob, long size)
+        public AzureReadStream(BlobClient blob, long size)
         {
             _blob = blob;
             Length = size;
@@ -69,8 +70,15 @@ namespace Lokad.ContentAddr.Azure
 
             if (count > 0)
             {
+                var ms = new MemoryStream();
                 await AzureRetry.Do(
-                    c => _blob.DownloadRangeToByteArrayAsync(buffer, offset, position, count, null, null, null, c),
+                    async c =>
+                    {
+                        using (var s = await _blob.OpenReadAsync(offset, count))
+                        {
+                            await s.ReadAsync(buffer, offset, count);
+                        }
+                    },
                     cancel).ConfigureAwait(false);
 
                 // Change the state of the stream only after the read has succeeded. This way,
@@ -133,8 +141,16 @@ namespace Lokad.ContentAddr.Azure
                 // Very large read does not follow the usual "sync" path.
                 DropSyncBuffer();
                 _position += count;
+                var ms = new MemoryStream();
                 AzureRetry.Do(
-                    c => _blob.DownloadRangeToByteArrayAsync(buffer, offset, position, count, c),
+                    async c =>
+                    {
+                        using (var s = await _blob.OpenReadAsync(offset, count))
+                        {
+                            await s.ReadAsync(buffer, offset, count, c);
+                        }
+                    },
+                    //_blob.DownloadToAsync(ms),
                     CancellationToken.None).Wait();
                 return count;
             }
@@ -198,9 +214,17 @@ namespace Lokad.ContentAddr.Azure
 
             _bufferOffset = 0;
             _bufferEnd = (int)Math.Min(_buffer.Length, Length - _position);
-
+            var ms = new MemoryStream();
             AzureRetry.Do(
-                c => _blob.DownloadRangeToByteArrayAsync(_buffer, 0, _position, _bufferEnd, c),
+                async c =>
+                {
+                    using (var s = await _blob.OpenReadAsync())
+                    {
+                        s.Seek(_position, SeekOrigin.Begin);
+                        await s.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
+                    }
+                },
+                //, _blob.DownloadToAsync(ms),
                 CancellationToken.None).Wait();
         }
 

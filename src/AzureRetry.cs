@@ -1,4 +1,4 @@
-﻿using Microsoft.WindowsAzure.Storage;
+﻿using Azure;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -43,15 +43,15 @@ namespace Lokad.ContentAddr.Azure
         public static bool RetryOnNoSuchAddress { get; set; } = false;
 
         /// <returns> True if we should retry on this error. </returns>
-        private static bool ShouldRetry(StorageException e)
+        private static bool ShouldRetry(RequestFailedException e)
         {
-            if (e.RequestInformation.HttpStatusCode >= 500)
+            if (e.Status >= 500)
                 // All server errors in the Blob Storage can be hoped to be transient,
                 // so keep retrying.
                 return true;
 
-            if (RetryOn403 && e.RequestInformation.HttpStatusCode == 403
-                           && e.RequestInformation.ErrorCode == "AuthenticationFailed")
+            if (RetryOn403 && e.Status == 403
+                           && e.ErrorCode == "AuthenticationFailed")
                 return true;
 
             if (RetryOnNoSuchAddress && e.Message == "No such device or address")
@@ -60,11 +60,11 @@ namespace Lokad.ContentAddr.Azure
             if (e.Message == "The SSL connection could not be established, see inner exception.")
                 return true;
 
-            if (e.RequestInformation.HttpStatusCode == 404 &&
-                e.RequestInformation.ErrorCode != "BlobNotFound" &&
-                e.RequestInformation.ErrorCode != "CannotVerifyCopySource" &&
-                e.RequestInformation.ErrorCode != "ResourceNotFound" &&
-                e.RequestInformation.ErrorCode != "ContainerNotFound")
+            if (e.Status == 404 &&
+                e.ErrorCode != "BlobNotFound" &&
+                e.ErrorCode != "CannotVerifyCopySource" &&
+                e.ErrorCode != "ResourceNotFound" &&
+                e.ErrorCode != "ContainerNotFound")
                 // Sometimes, the Azure API glitches out and returns an unrelated 404,
                 // which is fixed by waiting and retrying.
                 return true;
@@ -102,7 +102,7 @@ namespace Lokad.ContentAddr.Azure
                         OnRetry?.Invoke(new OperationCanceledException(cts.Token));
                     }
                 }
-                catch (StorageException e) when (DateTime.UtcNow < until && ShouldRetry(e))
+                catch (RequestFailedException e) when (DateTime.UtcNow < until && ShouldRetry(e))
                 {
                     OnRetry?.Invoke(e);
                     await Task.Delay(TimeSpan.FromSeconds(2), cancel).ConfigureAwait(false);
@@ -121,7 +121,7 @@ namespace Lokad.ContentAddr.Azure
                 return await action().ConfigureAwait(false);
             }
 
-            catch (StorageException e) when (ShouldRetry(e))
+            catch (RequestFailedException e) when (ShouldRetry(e))
             {
                 OnRetry?.Invoke(e);
                 return false;
@@ -161,7 +161,7 @@ namespace Lokad.ContentAddr.Azure
                         OnRetry?.Invoke(new OperationCanceledException(cts.Token));
                     }
                 }
-                catch (StorageException e) when (DateTime.UtcNow < until && ShouldRetry(e))
+                catch (RequestFailedException e) when (DateTime.UtcNow < until && ShouldRetry(e))
                 {
                     OnRetry?.Invoke(e);
                     await Task.Delay(TimeSpan.FromSeconds(2), cancel).ConfigureAwait(false);

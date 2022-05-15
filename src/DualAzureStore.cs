@@ -1,4 +1,4 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure.Storage.Blobs;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -29,10 +29,10 @@ namespace Lokad.ContentAddr.Azure
         /// <param name="onCommit"> Called when a blob is committed. </param>
         public DualAzureStore(
             string realm,
-            CloudBlobContainer oldPersistent,
-            CloudBlobContainer newPersistent,
-            CloudBlobContainer staging,
-            CloudBlobContainer archive,
+            BlobContainerClient oldPersistent,
+            BlobContainerClient newPersistent,
+            BlobContainerClient staging,
+            BlobContainerClient archive,
             AzureWriter.OnCommit onCommit = null) : base(realm, oldPersistent, newPersistent)
         {
             _newStore = new AzureStore(realm, newPersistent, staging, archive, onCommit);

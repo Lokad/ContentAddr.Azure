@@ -1,8 +1,11 @@
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Specialized;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,14 +16,14 @@ namespace Lokad.ContentAddr.Azure
     {
         /// <summary> Temporary blob in the staging container. </summary>
         /// <remarks> Can either be set initially or evaluated from <see cref="_temporaryTask"/>. </remarks>
-        protected CloudBlockBlob Temporary { get; private set; }
+        protected BlockBlobClient Temporary { get; private set; }
 
         /// <summary> If <see cref="Temporary"/> could not be provided when the writer was created. </summary>
         /// <remarks>
         ///     Will be awaited when the first write is performed, in order to populate 
         ///     <see cref="Temporary"/>.
         /// </remarks>
-        private readonly Task<CloudBlockBlob> _temporaryTask;
+        private readonly Task<BlockBlobClient> _temporaryTask;
 
         /// <summary> All sent Azure Blob blocks, to be PUT. </summary>
         private readonly List<string> _blocks = new List<string>();
@@ -28,12 +31,12 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> All individual upload tasks, to be awaited before the block list PUT. </summary>
         private readonly List<Task> _tasks = new List<Task>();
 
-        protected AzurePreWriter(CloudBlockBlob temporary)
+        protected AzurePreWriter(BlockBlobClient temporary)
         {
             Temporary = temporary ?? throw new ArgumentNullException(nameof(temporary));
         }
 
-        protected AzurePreWriter(Task<CloudBlockBlob> temporary)
+        protected AzurePreWriter(Task<BlockBlobClient> temporary)
         {
             _temporaryTask = temporary;
         }
@@ -46,23 +49,23 @@ namespace Lokad.ContentAddr.Azure
         private static readonly TimeSpan RetryInterval = TimeSpan.FromMilliseconds(500);
 
         /// <summary>
-        /// Wrapper around <see cref="CloudBlockBlob.PutBlockAsync"/> to perform a retry if we
+        /// Wrapper around <see cref="BlobClient.PutBlockAsync"/> to perform a retry if we
         /// got a "ServerBusy" response.
         /// </summary>
-        private static Task PutBlockAsyncRetry(CloudBlockBlob blob, string id, Stream ms, CancellationToken cancel) =>
-            ServerBusyRetry(() => blob.PutBlockAsync(id, ms, null, null, null, null, cancel), cancel);
+        private static Task PutBlockAsyncRetry(BlockBlobClient blob, string id, Stream ms, CancellationToken cancel) =>
+            ServerBusyRetry(() => blob.StageBlockAsync(id, ms, cancellationToken: cancel), cancel);
 
         /// <summary>
-        /// Wrapper around <see cref="CloudBlockBlob.PutBlockListAsync"/> to perform a retry if we
+        /// Wrapper around <see cref="BlobClient.PutBlockListAsync"/> to perform a retry if we
         /// got a "ServerBusy" response.
         /// </summary>
         private static Task PutBlockListAsyncRetry(
-            CloudBlockBlob blob, IReadOnlyList<string> blocks, CancellationToken cancel) =>
-            ServerBusyRetry(() => blob.PutBlockListAsync(blocks, null, null, null, cancel), cancel);
+            BlockBlobClient blob, IReadOnlyList<string> blocks, CancellationToken cancel) =>
+            ServerBusyRetry(() => blob.CommitBlockListAsync(blocks, cancellationToken: cancel), cancel);
 
         /// <summary>
         /// Retry a task generating function as long as we receive "ServerBusy" error
-        /// message in <see cref="StorageException"/>
+        /// message in <see cref="RequestFailedException"/>
         /// </summary>
         private static async Task ServerBusyRetry(Func<Task> toRetry, CancellationToken cancel)
         {
@@ -75,11 +78,11 @@ namespace Lokad.ContentAddr.Azure
                     await toRetry().ConfigureAwait(false);
                     retryCount = 0;
                 }
-                catch (StorageException ste) when (retryCount > 0)
+                catch (RequestFailedException ste) when (retryCount > 0)
                 {
                     // message from:
                     // https://docs.microsoft.com/en-us/rest/api/storageservices/common-rest-api-error-codes
-                    if (ste.RequestInformation.HttpStatusMessage != "ServerBusy")
+                    if (ste.ErrorCode != "ServerBusy")
                         throw;
 
                     // otherwise continue

@@ -1,8 +1,10 @@
-﻿using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,13 +14,13 @@ namespace Lokad.ContentAddr.Azure
     public sealed class AzureStoreFactory : IAzureStoreFactory
     {
         /// <summary> Staging blob container. </summary>
-        private readonly CloudBlobContainer _staging;
+        private readonly BlobContainerClient _staging;
 
         /// <summary> Persistent blob container. </summary>
-        private readonly CloudBlobContainer _persist;
+        private readonly BlobContainerClient _persist;
 
         /// <summary> Archive blob container. </summary>
-        private readonly CloudBlobContainer _archive;
+        private readonly BlobContainerClient _archive;
 
         /// <summary> Container prefix, if in testing. </summary>
         private readonly string _testPrefix;
@@ -27,7 +29,7 @@ namespace Lokad.ContentAddr.Azure
         public AzureWriter.OnCommit OnCommit { get; set; }
 
         /// <summary> The blob client
-        public CloudBlobClient BlobClient { get; }
+        public BlobServiceClient BlobClient { get; }
 
         public static IAzureStoreFactory ParseConfig(string config, bool readOnly = false, string testPrefix = null)
         {
@@ -38,10 +40,10 @@ namespace Lokad.ContentAddr.Azure
         }
 
         public AzureStoreFactory(string config, bool readOnly = false, string testPrefix = null) :
-            this(CloudStorageAccount.Parse(config).CreateCloudBlobClient(), readOnly, testPrefix)
+            this(new BlobServiceClient(config), readOnly, testPrefix)
         { }
 
-        public AzureStoreFactory(CloudBlobClient client, bool readOnly = false, string testPrefix = null)
+        public AzureStoreFactory(BlobServiceClient client, bool readOnly = false, string testPrefix = null)
         {
             var persistName = testPrefix == null ? "persist" : testPrefix + "-persist";
             var stagingName = testPrefix == null ? "staging" : testPrefix + "-staging";
@@ -49,7 +51,7 @@ namespace Lokad.ContentAddr.Azure
 
             _testPrefix = testPrefix;
             BlobClient = client;
-            _persist = client.GetContainerReference(persistName);
+            _persist = client.GetBlobContainerClient(persistName);
 
             if (readOnly)
             {
@@ -61,11 +63,11 @@ namespace Lokad.ContentAddr.Azure
                 if (!_persist.Exists())
                     _persist.CreateIfNotExistsAsync().Wait();
 
-                _staging = client.GetContainerReference(stagingName);
+                _staging = client.GetBlobContainerClient(stagingName);
                 if (!_staging.Exists())
                     _staging.CreateIfNotExistsAsync().Wait();
 
-                _archive = client.GetContainerReference(archiveName);
+                _archive = client.GetBlobContainerClient(archiveName);
                 if (!_archive.Exists())
                     _archive.CreateIfNotExistsAsync().Wait();
             }
@@ -102,7 +104,7 @@ namespace Lokad.ContentAddr.Azure
         }
 
         /// <see cref="IStoreFactory.Describe"/>
-        public string Describe() => "[CAS] " + _persist.ServiceClient.BaseUri;
+        public string Describe() => "[CAS] " + _persist.Uri;
 
         /// <summary> Retrieve all accounts that have blobs in stores from this factory. </summary>
         /// <remarks> Accounts are sorted in ascending order. </remarks>
@@ -110,29 +112,19 @@ namespace Lokad.ContentAddr.Azure
         {
             var accounts = new List<long>();
 
-            var token = default(BlobContinuationToken);
 
-            do
+            var result = await _persist.GetBlobsByHierarchyAsync(
+                traits: BlobTraits.None,
+                states: BlobStates.None,
+                prefix: "",
+                cancellationToken: cancel).ToListAsync().ConfigureAwait(false);
+
+            foreach (var item in result)
             {
-                var result = await _persist.ListBlobsSegmentedAsync(
-                    prefix: "",
-                    useFlatBlobListing: false,
-                    blobListingDetails: BlobListingDetails.None,
-                    maxResults: null,
-                    currentToken: token,
-                    options: null,
-                    operationContext: null,
-                    cancellationToken: cancel).ConfigureAwait(false);
+                if (item.IsPrefix && long.TryParse(item.Prefix.Trim('/'), out var account))
+                    accounts.Add(account);
+            }
 
-                foreach (var item in result.Results)
-                {
-                    if (item is CloudBlobDirectory dir && long.TryParse(dir.Prefix.Trim('/'), out var account))
-                        accounts.Add(account);
-                }
-
-                token = result.ContinuationToken;
-
-            } while (token != null);
 
             accounts.Sort();
 

@@ -1,4 +1,4 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure.Storage.Blobs;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +12,7 @@ namespace Lokad.ContentAddr.Azure
         /// <summary>
         /// Returns the actual storage blob
         /// </summary>
-        Task<CloudBlockBlob> GetBlob();
+        Task<BlobClient> GetBlob();
 
         /// <summary> The realm of this blob. </summary>
         string Realm { get; }

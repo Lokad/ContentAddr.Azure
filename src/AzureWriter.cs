@@ -1,4 +1,5 @@
-using Microsoft.WindowsAzure.Storage.Blob;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Specialized;
 using System;
 using System.Diagnostics;
 using System.Threading;
@@ -13,7 +14,7 @@ namespace Lokad.ContentAddr.Azure
     public sealed class AzureWriter : AzurePreWriter
     {
         /// <summary>The persistent container where the blob will be written. </summary>
-        private readonly CloudBlobContainer _persistent;
+        private readonly BlobContainerClient _persistent;
 
         /// <summary> Will be called when comitting. </summary>
         private readonly OnCommit _onCommit;
@@ -26,8 +27,8 @@ namespace Lokad.ContentAddr.Azure
 
         public AzureWriter(
             string realm,
-            CloudBlobContainer persistent,
-            CloudBlockBlob temporary,
+            BlobContainerClient persistent,
+            BlockBlobClient temporary,
             OnCommit onCommit) : base(temporary)
         {
             _realm = realm;
@@ -43,12 +44,12 @@ namespace Lokad.ContentAddr.Azure
         /// <see cref="StoreWriter.DoOptCommitAsync"/>
         protected override async Task DoOptCommitAsync(Hash hash, Func<Task> optionalWrite, CancellationToken cancel)
         {
-            var finalBlob = _persistent.GetBlockBlobReference(AzureReadOnlyStore.AzureBlobName(_realm, hash));
+            var finalBlob = _persistent.GetBlobClient(AzureReadOnlyStore.AzureBlobName(_realm, hash));
 
             // Final blob already exists (maybe it was uploaded earlier), do nothing.
-            if (await AzureRetry.OrFalse(() => finalBlob.ExistsAsync(null, null, cancel)).ConfigureAwait(false))
+            if (await AzureRetry.OrFalse(async () => await finalBlob.ExistsAsync(cancellationToken: cancel)).ConfigureAwait(false))
             {
-                _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, finalBlob.Properties.Length, true);
+                _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, finalBlob.GetProperties()?.Value?.ContentLength ?? 0, true);
                 return;
             }
 
@@ -65,7 +66,7 @@ namespace Lokad.ContentAddr.Azure
                 AzureStore.DeleteBlob(Temporary, TimeSpan.FromSeconds(1));
             }
 
-            _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, finalBlob.Properties.Length, false);
+            _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, finalBlob.GetProperties()?.Value?.ContentLength ?? 0, false);
         }
 
         /// <summary> A delegate used for logging commit information. </summary>

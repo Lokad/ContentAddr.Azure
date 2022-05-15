@@ -1,5 +1,8 @@
-﻿using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Storage.Blobs.Specialized;
+using Azure.Storage.Sas;
 using System;
 using System.Diagnostics;
 using System.IO.Compression;
@@ -27,10 +30,10 @@ namespace Lokad.ContentAddr.Azure
         private readonly AzureWriter.OnCommit _onCommit;
 
         /// <summary> The container where temporary blobs are staged for a short while. </summary>
-        private CloudBlobContainer Staging { get; }
+        private BlobContainerClient Staging { get; }
 
         /// <summary> The container where archived blobs are stored. </summary>
-        private CloudBlobContainer Archive { get; }
+        private BlobContainerClient Archive { get; }
 
         /// <param name="realm"> <see cref="AzureReadOnlyStore"/> </param>
         /// <param name="persistent"> 
@@ -42,9 +45,9 @@ namespace Lokad.ContentAddr.Azure
         /// <param name="onCommit"> Called when a blob is committed. </param>
         public AzureStore(
             string realm,
-            CloudBlobContainer persistent,
-            CloudBlobContainer staging,
-            CloudBlobContainer archive,
+            BlobContainerClient persistent,
+            BlobContainerClient staging,
+            BlobContainerClient archive,
             AzureWriter.OnCommit onCommit = null) : base(realm, persistent)
         {
             _onCommit = onCommit;
@@ -57,8 +60,8 @@ namespace Lokad.ContentAddr.Azure
             new AzureWriter(Realm, Persistent, TempBlob(), _onCommit);
 
         /// <summary> A reference to a temporary blob in the staging container. </summary>
-        private CloudBlockBlob TempBlob() =>
-            Staging.GetBlockBlobReference(
+        private BlockBlobClient TempBlob() =>
+            Staging.GetBlockBlobClient(
                 DateTime.UtcNow.ToString("yyyy-MM-dd") + "/" + Realm + "/" + Guid.NewGuid());
 
         /// <summary> Get the URL of a temporary blob where data can be uploaded. </summary>
@@ -71,18 +74,12 @@ namespace Lokad.ContentAddr.Azure
         /// </remarks>
         public Uri GetSignedUploadUrl(string name, TimeSpan life)
         {
-            var blob = Staging.GetBlockBlobReference(name);
-            var token = blob.GetSharedAccessSignature(new SharedAccessBlobPolicy
-            {
-                Permissions = SharedAccessBlobPermissions.Write | SharedAccessBlobPermissions.Delete,
-                SharedAccessExpiryTime = new DateTimeOffset(DateTime.UtcNow + life)
-            },
-            new SharedAccessBlobHeaders
-            {
-                CacheControl = "private"
-            });
+            var blob = Staging.GetBlobClient(name);
+            var url = blob.GenerateSasUri(BlobSasPermissions.Write | BlobSasPermissions.Delete,
+                expiresOn: new DateTimeOffset(DateTime.UtcNow + life));
 
-            return new Uri(blob.Uri.AbsoluteUri + token);
+
+            return url;
         }
 
         /// <summary> Compress a blob into the archive container and set its tier to "archive" in Azure. </summary>
@@ -90,11 +87,14 @@ namespace Lokad.ContentAddr.Azure
         public async Task ArchiveBlobAsync(IAzureReadBlobRef blob, CancellationToken cancel = default)
         {
             var aBlob = await blob.GetBlob();
-            var destinationCloudBlockBlob = Archive.GetBlockBlobReference(aBlob.Name);
+            var destinationBlobClient = Archive.GetBlobClient(aBlob.Name);
 
-            if (await destinationCloudBlockBlob.ExistsAsync(cancel)) return;
+            if (await destinationBlobClient.ExistsAsync(cancel)) return;
 
-            using (var azureWriteStream = await destinationCloudBlockBlob.OpenWriteAsync(cancel))
+            using (var azureWriteStream = await destinationBlobClient.OpenWriteAsync(true, new BlobOpenWriteOptions
+            {
+                BufferSize = 1024
+            }, cancellationToken: cancel))
             {
                 using (var gzStream = new GZipStream(azureWriteStream, CompressionMode.Compress))
                 {
@@ -105,7 +105,7 @@ namespace Lokad.ContentAddr.Azure
                 }
             }
 
-            await destinationCloudBlockBlob.SetStandardBlobTierAsync(StandardBlobTier.Archive, cancel);
+            await destinationBlobClient.SetAccessTierAsync(AccessTier.Archive, cancellationToken: cancel);
         }
 
         /// <summary>
@@ -122,20 +122,20 @@ namespace Lokad.ContentAddr.Azure
             var blobName = AzureBlobName(Realm, hash);
 
             // we check if UnArchive was already done successfully : if blob exists in Persistent
-            var pBlob = Persistent.GetBlockBlobReference(blobName);
-            if (await pBlob.ExistsAsync(null, null, cancel))
+            var pBlob = Persistent.GetBlobClient(blobName);
+            if (await pBlob.ExistsAsync(cancel))
                 return UnArchiveStatus.Done;
 
             // We check if Blob is already copied in Staging
-            var sBlob = Staging.GetBlockBlobReference(blobName);
-            if (await sBlob.ExistsAsync(null, null, cancel))
+            var sBlob = Staging.GetBlobClient(blobName);
+            if (await sBlob.ExistsAsync(cancel))
             {
                 // We check which status it has
-                if (sBlob.Properties.StandardBlobTier != StandardBlobTier.Hot)
+                if (sBlob.GetProperties()?.Value?.AccessTier != AccessTier.Hot.ToString())
                     return UnArchiveStatus.Rehydrating;
 
                 // decompressing compressed blob into Persistent
-                using (var azureReadStream = await sBlob.OpenReadAsync(cancel))
+                using (var azureReadStream = await sBlob.OpenReadAsync(cancellationToken: cancel))
                 {
                     using (var gzStream = new GZipStream(azureReadStream, CompressionMode.Decompress))
                     {
@@ -149,24 +149,16 @@ namespace Lokad.ContentAddr.Azure
             }
 
             // we check if the archived blob exists
-            var aBlob = Archive.GetBlockBlobReference(blobName);
-            if (!(await aBlob.ExistsAsync(null, null, cancel)))
+            var aBlob = Archive.GetBlobClient(blobName);
+            if (!(await aBlob.ExistsAsync(cancel)))
                 return UnArchiveStatus.DoesNotExist;
 
             // if blob not already copied in Staging,
             // copy it by using a newer API version that
             // deal with unarchiving at the same time
-            var oc = new OperationContext();
-            oc.SendingRequest += (_, e) =>
-            {
-                if (e.Request.Headers.Contains("x-ms-access-tier"))
-                {
-                    e.Request.Headers.Remove("x-ms-access-tier");
-                }
-                e.Request.Headers.Add("x-ms-access-tier", "Hot");
-                e.Request.Headers.Add("x-ms-version", "2021-04-10");
-            };
-            await sBlob.StartCopyAsync(aBlob, null, null, null, oc, cancel);
+
+            await sBlob.StartCopyFromUriAsync(aBlob.Uri, new BlobCopyFromUriOptions { RehydratePriority = RehydratePriority.High, AccessTier = AccessTier.Hot }, cancellationToken: cancel);
+
 
             return UnArchiveStatus.Rehydrating;
         }
@@ -181,8 +173,8 @@ namespace Lokad.ContentAddr.Azure
         {
             var sw = Stopwatch.StartNew();
 
-            var temporary = Staging.GetBlockBlobReference(name);
-            if (!await temporary.ExistsAsync(null, null, cancel).ConfigureAwait(false))
+            var temporary = Staging.GetBlockBlobClient(name);
+            if (!await temporary.ExistsAsync(cancel).ConfigureAwait(false))
                 throw new CommitBlobException(Realm, name, "temporary blob does not exist.");
 
             var md5 = MD5.Create();
@@ -190,7 +182,7 @@ namespace Lokad.ContentAddr.Azure
             // We use buffered async reading, so determine a good buffer size.
             var bufferSize = 4 * 1024 * 1024;
 
-            long? blobLength = temporary.Properties?.Length;
+            long? blobLength = temporary.GetProperties()?.Value?.ContentLength;
             if (blobLength < bufferSize)
                 bufferSize = (int)blobLength.Value;
 
@@ -199,7 +191,7 @@ namespace Lokad.ContentAddr.Azure
             int nbRead = 1;
             long position = 0;
 
-            using (var stream = await temporary.OpenReadAsync(null, null, null, cancel).ConfigureAwait(false))
+            using (var stream = await temporary.OpenReadAsync(cancellationToken: cancel).ConfigureAwait(false))
             {
                 int read = 0;
                 do
@@ -219,11 +211,11 @@ namespace Lokad.ContentAddr.Azure
 
             var hash = new Hash(md5.Hash);
 
-            var final = Persistent.GetBlockBlobReference(AzureBlobName(Realm, hash));
+            var final = Persistent.GetBlobClient(AzureBlobName(Realm, hash));
 
             try
             {
-                var exists = await AzureRetry.OrFalse(() => final.ExistsAsync(null, null, cancel))
+                var exists = await AzureRetry.OrFalse(async () => await final.ExistsAsync(cancellationToken: cancel))
                     .ConfigureAwait(false);
 
                 if (!exists)
@@ -231,7 +223,7 @@ namespace Lokad.ContentAddr.Azure
                     await CopyToPersistent(temporary, final, cancel).ConfigureAwait(false);
                 }
 
-                _onCommit?.Invoke(sw.Elapsed, Realm, hash, final.Properties.Length, exists);
+                _onCommit?.Invoke(sw.Elapsed, Realm, hash, final.GetProperties()?.Value?.ContentLength ?? 0, exists);
             }
             finally
             {
@@ -244,7 +236,7 @@ namespace Lokad.ContentAddr.Azure
 
         /// <summary> Delete a block after a short wait. </summary>
         /// <remarks> This schedules the deletion but does not wait for it. </remarks>
-        public static void DeleteBlob(CloudBlockBlob temporary, TimeSpan wait)
+        public static void DeleteBlob(BlockBlobClient temporary, TimeSpan wait)
         {
             // After a short while, delete the staging blob. Don't do it immediately, just
             // in case another thread (or server) is currently touching it as well.
@@ -257,24 +249,24 @@ namespace Lokad.ContentAddr.Azure
         ///     failed. 
         /// </remarks>
         public static async Task CopyToPersistent(
-            CloudBlockBlob temporary,
-            CloudBlockBlob final,
+            BlockBlobClient temporary,
+            BlobClient final,
             CancellationToken cancel)
         {
             // Copy the blob over.
             await AzureRetry.Do(
-                c => final.StartCopyAsync(temporary, null, null, null, null, c),
+                c => final.StartCopyFromUriAsync(temporary.Uri, cancellationToken: c),
                 cancel).ConfigureAwait(false);
 
             // Wait for copy to finish.
             var delay = 250;
             while (true)
             {
-                await AzureRetry.Do(
-                    c => final.FetchAttributesAsync(null, null, null, c),
-                    cancel).ConfigureAwait(false);
+                var props = await AzureRetry.Do(
+                            c => final.GetPropertiesAsync(cancellationToken: c),
+                            cancel).ConfigureAwait(false);
 
-                switch (final.CopyState.Status)
+                switch (props.Value.BlobCopyStatus)
                 {
                     case CopyStatus.Pending:
                         if (delay <= 120000) delay *= 2;
@@ -282,8 +274,7 @@ namespace Lokad.ContentAddr.Azure
                         continue;
                     case CopyStatus.Aborted:
                     case CopyStatus.Failed:
-                    case CopyStatus.Invalid:
-                        throw new Exception("Internal copy for '" + final.Name + "' failed (" + final.CopyState.Status + ")");
+                        throw new Exception("Internal copy for '" + final.Name + "' failed (" + props.Value.BlobCopyStatus + ")");
                     case CopyStatus.Success:
                         return;
                     default:
