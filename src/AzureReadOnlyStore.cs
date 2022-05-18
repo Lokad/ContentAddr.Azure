@@ -63,21 +63,32 @@ namespace Lokad.ContentAddr.Azure
             var blobPrefix = $"{Realm}/{prefix:X2}";
             var count = 0;
 
-
-            var result = await Persistent.GetBlobsAsync(BlobTraits.Metadata,
+            var token = default(string);
+            do
+            {
+                var result = await Persistent.GetBlobsAsync(BlobTraits.Metadata,
                 BlobStates.None,
                 blobPrefix,
-                cancel).ToListAsync();
+                cancel).AsPages(token)
+                .ToListAsync(cancel)
+                .ConfigureAwait(false);
 
-            foreach (var item in result)
-            {
-                if (!(item is BlobItem blob)) continue;
-                if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
-                if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
+                foreach (var page in result)
+                {
+                    foreach (var item in page.Values)
+                    {
+                        if (!(item is BlobItem blob)) continue;
+                        if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
+                        if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                ++count;
-                callback(hash, blob.Properties.ContentLength.GetValueOrDefault(), dto.UtcDateTime);
-            }
+                        ++count;
+                        callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
+                    }
+
+                    token = page.ContinuationToken;
+                }
+
+            } while (token != null);
 
             return count;
         }
@@ -88,21 +99,26 @@ namespace Lokad.ContentAddr.Azure
         {
             var blobPrefix = $"{Realm}/";
 
-            var result = await Persistent.GetBlobsAsync(
-                BlobTraits.Metadata,
-                BlobStates.None,
-                blobPrefix,
-                cancel).ToListAsync();
+            var token = default(string);
 
-            if (!result.Any()) return false;
+            var result = await Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                states: BlobStates.None,
+                prefix: blobPrefix,
+                cancellationToken: cancel)
+                .AsPages(token)
+                .ToListAsync(cancel)
+                .ConfigureAwait(false);
 
-            foreach (var item in result)
+            var firstPage = result.FirstOrDefault();
+            if (firstPage.ContinuationToken != null) return false;
+
+            foreach (var item in firstPage.Values)
             {
                 if (!(item is BlobItem blob)) continue;
                 if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
                 if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                callback(hash, blob.Properties.ContentLength.GetValueOrDefault(), dto.UtcDateTime);
+                callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
             }
 
             return true;

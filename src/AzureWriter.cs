@@ -49,7 +49,8 @@ namespace Lokad.ContentAddr.Azure
             // Final blob already exists (maybe it was uploaded earlier), do nothing.
             if (await AzureRetry.OrFalse(async () => await finalBlob.ExistsAsync(cancellationToken: cancel)).ConfigureAwait(false))
             {
-                _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, finalBlob.GetProperties()?.Value?.ContentLength ?? 0, true);
+                var finalBlobProps = await finalBlob.GetPropertiesAsync(cancellationToken: cancel).ConfigureAwait(false);
+                _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, finalBlobProps.Value.ContentLength, true);
                 return;
             }
 
@@ -66,7 +67,8 @@ namespace Lokad.ContentAddr.Azure
                 AzureStore.DeleteBlob(Temporary, TimeSpan.FromSeconds(1));
             }
 
-            _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, finalBlob.GetProperties()?.Value?.ContentLength ?? 0, false);
+            var props = await finalBlob.GetPropertiesAsync(cancellationToken: cancel).ConfigureAwait(false);
+            _onCommit?.Invoke(_stopwatch.Elapsed, _realm, hash, props.Value.ContentLength, false);
         }
 
         /// <summary> A delegate used for logging commit information. </summary>

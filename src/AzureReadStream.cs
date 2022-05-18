@@ -224,7 +224,6 @@ namespace Lokad.ContentAddr.Azure
                         await s.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
                     }
                 },
-                //, _blob.DownloadToAsync(ms),
                 CancellationToken.None).Wait();
         }
 

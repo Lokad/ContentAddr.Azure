@@ -82,16 +82,8 @@ namespace Lokad.ContentAddr.Tests
             var prefix = PersistContainer.Uri + "/a/B2EA9F7FCEA831A4A63B213F41A8855B";
             Assert.Equal(prefix, url.Substring(0, prefix.Length));
 
-            // HINT: suffix is no longer constructed in the same order for the download URL.
-            //var suffix = "&sp=r&rsct=application%2Foctet-stream&rscd=attachment%3Bfilename%3D\"test.bin\"";
-            //Assert.Equal(suffix, url.Substring(url.Length - suffix.Length));
-            
-            // Alternative way that doesn't asume specific order for query strings in the URL.
-            Assert.Contains("&sp=r", url);
-            Assert.Contains("&rsct=application%2Foctet-stream", url);
-            Assert.Contains("&rscd=attachment%3Bfilename%3D\"test.bin\"", url);
-            Assert.Contains("test.bin", url);
-            Assert.Contains("sig=", url);
+            var suffix = "&sp=r&rscd=attachment%3Bfilename%3D\"test.bin\"&rsct=application%2Foctet-stream&sig=";
+            Assert.Equal(suffix, url.Substring(url.IndexOf(suffix), suffix.Length));
         }
 
         [Fact()]
@@ -148,14 +140,14 @@ namespace Lokad.ContentAddr.Tests
             var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var aBlob = await a.GetBlob();
 
-            
+
             var etag = aBlob.GetProperties()?.Value?.ETag;
 
             await store.WriteAsync(file, CancellationToken.None);
 
             var b = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var bBlob = await b.GetBlob();
-   
+
             Assert.Equal(etag, bBlob.GetProperties()?.Value?.ETag);
         }
 
