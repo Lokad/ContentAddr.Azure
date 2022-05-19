@@ -66,14 +66,13 @@ namespace Lokad.ContentAddr.Azure
             var token = default(string);
             do
             {
-                var result = await Persistent.GetBlobsAsync(BlobTraits.Metadata,
-                BlobStates.None,
-                blobPrefix,
-                cancel).AsPages(token)
-                .ToListAsync(cancel)
-                .ConfigureAwait(false);
+                var result = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                    states: BlobStates.None,
+                    prefix: blobPrefix,
+                    cancellationToken: cancel)
+                    .AsPages(token);
 
-                foreach (var page in result)
+                await foreach (var page in result)
                 {
                     foreach (var item in page.Values)
                     {
@@ -101,15 +100,13 @@ namespace Lokad.ContentAddr.Azure
 
             var token = default(string);
 
-            var result = await Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+            var result = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
                 states: BlobStates.None,
                 prefix: blobPrefix,
                 cancellationToken: cancel)
-                .AsPages(token)
-                .ToListAsync(cancel)
-                .ConfigureAwait(false);
+                .AsPages(token);
 
-            var firstPage = result.FirstOrDefault();
+            var firstPage = await result.FirstOrDefaultAsync(cancel);
             if (firstPage.ContinuationToken != null) return false;
 
             foreach (var item in firstPage.Values)

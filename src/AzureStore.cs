@@ -93,7 +93,7 @@ namespace Lokad.ContentAddr.Azure
 
             using (var azureWriteStream = await destinationBlobClient.OpenWriteAsync(true, new BlobOpenWriteOptions
             {
-                BufferSize = 1024
+                BufferSize = 4 * 1024 * 1024
             }, cancellationToken: cancel))
             {
                 using (var gzStream = new GZipStream(azureWriteStream, CompressionMode.Compress))
@@ -157,7 +157,13 @@ namespace Lokad.ContentAddr.Azure
             // copy it by using a newer API version that
             // deal with unarchiving at the same time
 
-            await sBlob.StartCopyFromUriAsync(aBlob.Uri, new BlobCopyFromUriOptions { RehydratePriority = RehydratePriority.High, AccessTier = AccessTier.Hot }, cancellationToken: cancel);
+            await sBlob.StartCopyFromUriAsync(aBlob.Uri,
+                new BlobCopyFromUriOptions
+                {
+                    RehydratePriority = RehydratePriority.High,
+                    AccessTier = AccessTier.Hot
+                }
+                , cancellationToken: cancel);
 
 
             return UnArchiveStatus.Rehydrating;

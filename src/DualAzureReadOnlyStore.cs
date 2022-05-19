@@ -70,15 +70,13 @@ namespace Lokad.ContentAddr.Azure
                 var token = default(string);
                 do
                 {
-                    var result = await persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
-                    states: BlobStates.None,
-                    prefix: blobPrefix,
-                    cancellationToken: cancel)
-                    .AsPages(token)
-                    .ToListAsync(cancel)
-                    .ConfigureAwait(false);
+                    var result = persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                        states: BlobStates.None,
+                        prefix: blobPrefix,
+                        cancellationToken: cancel)
+                        .AsPages(token);
 
-                    foreach (var page in result)
+                    await foreach (var page in result)
                     {
                         foreach (var item in page.Values)
                         {

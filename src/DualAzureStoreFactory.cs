@@ -115,15 +115,13 @@ namespace Lokad.ContentAddr.Azure
             var token = default(string);
             do
             {
-                var result = await cbc.GetBlobsByHierarchyAsync(traits: BlobTraits.Metadata,
-                states: BlobStates.None,
-                prefix: "",
-                cancellationToken: cancel)
-                .AsPages(token)
-                .ToListAsync(cancel)
-                .ConfigureAwait(false);
+                var result = cbc.GetBlobsByHierarchyAsync(traits: BlobTraits.Metadata,
+                    states: BlobStates.None,
+                    prefix: "",
+                    cancellationToken: cancel)
+                    .AsPages(token);
 
-                foreach (var page in result)
+                await foreach (var page in result)
                 {
                     foreach (var item in page.Values)
                     {
