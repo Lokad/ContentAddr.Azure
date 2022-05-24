@@ -1,7 +1,9 @@
 ﻿using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using Azure.Storage.Sas;
 using System;
 using System.IO;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -70,13 +72,22 @@ namespace Lokad.ContentAddr.Azure
 
             if (count > 0)
             {
-                var ms = new MemoryStream();
                 await AzureRetry.Do(
                     async c =>
                     {
-                        using (var s = await _blob.OpenReadAsync(offset, count))
+                        var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
+                                                               new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                        using (var httpClient = new HttpClient())
                         {
-                            await s.ReadAsync(buffer, offset, count);
+                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{offset + position + count - 1}");
+                            using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
+                            {
+                                using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
+                                {
+                                    await bodyStream.ReadAsync(buffer, offset, count, c);
+                                }
+                            }
+
                         }
                     },
                     cancel).ConfigureAwait(false);
@@ -141,16 +152,25 @@ namespace Lokad.ContentAddr.Azure
                 // Very large read does not follow the usual "sync" path.
                 DropSyncBuffer();
                 _position += count;
-                var ms = new MemoryStream();
                 AzureRetry.Do(
                     async c =>
                     {
-                        using (var s = await _blob.OpenReadAsync(offset, count))
+                        var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
+                                                               new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                        using (var httpClient = new HttpClient())
                         {
-                            await s.ReadAsync(buffer, offset, count, c);
+                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{offset + _position - 1}");
+                            using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
+                            {
+                                using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
+                                {
+                                    await bodyStream.ReadAsync(buffer, offset, count, c);
+                                }
+                            }
+
                         }
+
                     },
-                    //_blob.DownloadToAsync(ms),
                     CancellationToken.None).Wait();
                 return count;
             }
@@ -214,14 +234,24 @@ namespace Lokad.ContentAddr.Azure
 
             _bufferOffset = 0;
             _bufferEnd = (int)Math.Min(_buffer.Length, Length - _position);
-            var ms = new MemoryStream();
             AzureRetry.Do(
                 async c =>
                 {
-                    using (var s = await _blob.OpenReadAsync())
+                    var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
+                                                           new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                    using (var httpClient = new HttpClient())
                     {
-                        s.Seek(_position, SeekOrigin.Begin);
-                        await s.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
+                        var bytesEnd = _position < _bufferEnd ? $"{_bufferEnd - 1}" : "";
+                        var range = $"bytes={_position}-{bytesEnd}";
+                        httpClient.DefaultRequestHeaders.Add("x-ms-range", range);
+                        using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
+                        {
+                            using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
+                            {
+                                await bodyStream.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
+                            }
+                        }
+
                     }
                 },
                 CancellationToken.None).Wait();
