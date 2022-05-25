@@ -79,7 +79,7 @@ namespace Lokad.ContentAddr.Azure
                                                                new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
                         using (var httpClient = new HttpClient())
                         {
-                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{offset + position + count - 1}");
+                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
                             using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
                             {
                                 using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
@@ -159,7 +159,7 @@ namespace Lokad.ContentAddr.Azure
                                                                new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
                         using (var httpClient = new HttpClient())
                         {
-                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{offset + _position - 1}");
+                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
                             using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
                             {
                                 using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
@@ -241,9 +241,7 @@ namespace Lokad.ContentAddr.Azure
                                                            new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
                     using (var httpClient = new HttpClient())
                     {
-                        var bytesEnd = _position < _bufferEnd ? $"{_bufferEnd - 1}" : "";
-                        var range = $"bytes={_position}-{bytesEnd}";
-                        httpClient.DefaultRequestHeaders.Add("x-ms-range", range);
+                        httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={_position}-{_position + _bufferEnd - 1}");
                         using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
                         {
                             using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
