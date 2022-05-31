@@ -1,5 +1,7 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -22,10 +24,10 @@ namespace Lokad.ContentAddr.Azure
     public class DualAzureReadOnlyStore : IAzureReadOnlyStore
     {
         /// <summary> The container where blobs are persisted on the old version. </summary>
-        protected CloudBlobContainer OldPersistent { get; }
+        protected BlobContainerClient OldPersistent { get; }
 
         /// <summary> The container where blobs are persisted on the new version. </summary>
-        protected CloudBlobContainer NewPersistent { get; }
+        protected BlobContainerClient NewPersistent { get; }
 
         /// <summary> The realm for this store. </summary>
         protected string Realm { get; }
@@ -33,7 +35,7 @@ namespace Lokad.ContentAddr.Azure
         /// <see cref="IReadOnlyStore.Realm"/>
         long IReadOnlyStore.Realm => long.Parse(Realm);
 
-        public DualAzureReadOnlyStore(string realm, CloudBlobContainer oldPersistent, CloudBlobContainer newPersistent)
+        public DualAzureReadOnlyStore(string realm, BlobContainerClient oldPersistent, BlobContainerClient newPersistent)
         {
             OldPersistent = oldPersistent;
             NewPersistent = newPersistent;
@@ -45,8 +47,8 @@ namespace Lokad.ContentAddr.Azure
             new DualAzureBlobRef(
                 Realm,
                 hash,
-                OldPersistent.GetBlockBlobReference(AzureBlobName(Realm, hash)),
-                NewPersistent.GetBlockBlobReference(AzureBlobName(Realm, hash)));
+                OldPersistent.GetBlobClient(AzureBlobName(Realm, hash)),
+                NewPersistent.GetBlobClient(AzureBlobName(Realm, hash)));
 
         /// <summary>
         ///     Enumerate all blobs with the provided prefix, in ascending hash order per container,
@@ -65,30 +67,29 @@ namespace Lokad.ContentAddr.Azure
 
             foreach (var persistent in new[] { OldPersistent, NewPersistent })
             {
-                var token = default(BlobContinuationToken);
+                var token = default(string);
                 do
                 {
-                    var result = await persistent.ListBlobsSegmentedAsync(
+                    var result = persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                        states: BlobStates.None,
                         prefix: blobPrefix,
-                        useFlatBlobListing: true,
-                        blobListingDetails: BlobListingDetails.Metadata,
-                        maxResults: null,
-                        currentToken: token,
-                        options: null,
-                        operationContext: null,
-                        cancellationToken: cancel).ConfigureAwait(false);
+                        cancellationToken: cancel)
+                        .AsPages(token);
 
-                    foreach (var item in result.Results)
+                    await foreach (var page in result)
                     {
-                        if (!(item is CloudBlob blob)) continue;
-                        if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
-                        if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
+                        foreach (var item in page.Values)
+                        {
+                            if (!(item is BlobItem blob)) continue;
+                            if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
+                            if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                        ++count;
-                        callback(hash, blob.Properties.Length, dto.UtcDateTime);
+                            ++count;
+                            callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
+                        }
+
+                        token = page.ContinuationToken;
                     }
-
-                    token = result.ContinuationToken;
 
                 } while (token != null);
             }
@@ -109,8 +110,8 @@ namespace Lokad.ContentAddr.Azure
         public bool IsSameStore(IReadOnlyStore other)
         {
             if (other is DualAzureReadOnlyStore aros)
-                return aros.NewPersistent.StorageUri.PrimaryUri.Equals(NewPersistent.StorageUri.PrimaryUri) &&
-                       aros.OldPersistent.StorageUri.PrimaryUri.Equals(OldPersistent.StorageUri.PrimaryUri) &&
+                return aros.NewPersistent.Uri.Equals(NewPersistent.Uri) &&
+                       aros.OldPersistent.Uri.Equals(OldPersistent.Uri) &&
                        Realm == aros.Realm;
 
             return false;

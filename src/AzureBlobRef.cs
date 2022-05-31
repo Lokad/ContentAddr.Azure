@@ -1,5 +1,6 @@
-﻿using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Sas;
 using System;
 using System.IO;
 using System.Linq;
@@ -17,7 +18,7 @@ namespace Lokad.ContentAddr.Azure
     /// </remarks>
     public sealed class AzureBlobRef : IAzureReadBlobRef
     {
-        public AzureBlobRef(string realm, Hash hash, CloudBlockBlob blob)
+        public AzureBlobRef(string realm, Hash hash, BlobClient blob)
         {
             Hash = hash;
             Realm = realm;
@@ -35,14 +36,14 @@ namespace Lokad.ContentAddr.Azure
         public string Realm { get; }
 
         /// <summary> The Azure Storage blob where the blob data is stored. </summary>
-        public CloudBlockBlob Blob { get; }
+        public BlobClient Blob { get; }
 
         /// <see cref="IReadBlobRef.ExistsAsync"/>
-        public Task<bool> ExistsAsync(CancellationToken cancel) =>
-            Blob.ExistsAsync(null, null, cancel);
+        public async Task<bool> ExistsAsync(CancellationToken cancel) =>
+            await Blob.ExistsAsync(cancel);
 
         /// <see cref="IAzureReadBlobRef.GetBlob"/>
-        public Task<CloudBlockBlob> GetBlob() =>
+        public Task<BlobClient> GetBlob() =>
             Task.FromResult(Blob);
 
         /// <see cref="IReadBlobRef.GetSizeAsync"/>
@@ -50,17 +51,18 @@ namespace Lokad.ContentAddr.Azure
         {
             // If properties are not loaded yet, they will either be null or 
             // contain a length of -1.
-            if (Blob.Properties != null && Blob.Properties.Length >= 0)
-                return Blob.Properties.Length;
+            var props = await Blob.GetPropertiesAsync(cancellationToken: cancel);
+            if (props != null && props.Value?.ContentLength >= 0)
+                return props.Value.ContentLength;
 
             try
             {
                 await AzureRetry.Do(
-                    c => Blob.FetchAttributesAsync(null, null, null, c),
+                    c => Blob.GetPropertiesAsync(cancellationToken: c),
                     cancel).ConfigureAwait(false);
-                return Blob.Properties.Length;
+                return props.Value.ContentLength;
             }
-            catch (StorageException e) when (e.RequestInformation.HttpStatusCode == 404)
+            catch (RequestFailedException e) when (e.Status == 404)
             {
                 throw new NoSuchBlobException(Realm, Hash);
             }
@@ -102,18 +104,13 @@ namespace Lokad.ContentAddr.Azure
                     ? "attachment;filename=\"" + asciiFilename + "\";filename*=UTF-8''" + utf8Filename + ""
                     : "attachment;filename=\"" + asciiFilename + "\"";
 
-            var token = Blob.GetSharedAccessSignature(new SharedAccessBlobPolicy
+            var token = Blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read, new DateTimeOffset(now + life))
             {
-                Permissions = SharedAccessBlobPermissions.Read,
-                SharedAccessExpiryTime = new DateTimeOffset(now + life),
-                SharedAccessStartTime = new DateTimeOffset(now.AddMinutes(-5))
-            }, new SharedAccessBlobHeaders
-            {
+                StartsOn = new DateTimeOffset(now.AddMinutes(-5)),
                 ContentDisposition = contentDisposition,
                 ContentType = contentType,
                 ContentEncoding = null,
             });
-
             return Task.FromResult(new Uri(Blob.Uri, token));
         }
 

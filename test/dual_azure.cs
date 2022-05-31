@@ -1,7 +1,7 @@
 ﻿using Lokad.ContentAddr.Azure;
 using Lokad.ContentAddr.Azure.Tests;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+using Azure;
+using Azure.Storage.Blobs;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -19,33 +19,32 @@ namespace Lokad.ContentAddr.Tests
 
         public static readonly string OldConnection = File.ReadAllText("azure_dual_connection.txt");
 
-        protected CloudBlobClient OldClient;
-        protected CloudBlobClient NewClient;
+        protected BlobServiceClient OldClient;
+        protected BlobServiceClient NewClient;
 
-        protected CloudBlobContainer OldPersistContainer;
-        protected CloudBlobContainer NewPersistContainer;
-        protected CloudBlobContainer StagingContainer;
-        protected CloudBlobContainer ArchiveContainer;
+        protected BlobContainerClient OldPersistContainer;
+        protected BlobContainerClient NewPersistContainer;
+        protected BlobContainerClient StagingContainer;
+        protected BlobContainerClient ArchiveContainer;
 
         protected string TestPrefix;
 
         public dual_azure()
         {
-            var account = CloudStorageAccount.Parse(NewConnection);
-            OldClient = account.CreateCloudBlobClient();
-            NewClient = account.CreateCloudBlobClient();
+            OldClient = new BlobServiceClient(NewConnection);
+            NewClient = new BlobServiceClient(NewConnection);
             TestPrefix = Guid.NewGuid().ToString();
 
-            OldPersistContainer = OldClient.GetContainerReference(TestPrefix + "-newpersist");
+            OldPersistContainer = OldClient.GetBlobContainerClient(TestPrefix + "-newpersist");
             OldPersistContainer.CreateIfNotExists();
 
-            NewPersistContainer = NewClient.GetContainerReference(TestPrefix + "-oldpersist");
+            NewPersistContainer = NewClient.GetBlobContainerClient(TestPrefix + "-oldpersist");
             NewPersistContainer.CreateIfNotExists();
 
-            StagingContainer = NewClient.GetContainerReference(TestPrefix + "-staging");
+            StagingContainer = NewClient.GetBlobContainerClient(TestPrefix + "-staging");
             StagingContainer.CreateIfNotExists();
 
-            ArchiveContainer = NewClient.GetContainerReference(TestPrefix + "-archive");
+            ArchiveContainer = NewClient.GetBlobContainerClient(TestPrefix + "-archive");
             ArchiveContainer.CreateIfNotExists();
 
             Store = new DualAzureStore("a", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer);
@@ -88,8 +87,8 @@ namespace Lokad.ContentAddr.Tests
             var prefix = NewPersistContainer.Uri + "/a/B2EA9F7FCEA831A4A63B213F41A8855B";
             Assert.Equal(prefix, url.Substring(0, prefix.Length));
 
-            var suffix = "&sp=r&rsct=application%2Foctet-stream&rscd=attachment%3Bfilename%3D\"test.bin\"";
-            Assert.Equal(suffix, url.Substring(url.Length - suffix.Length));
+            var suffix = "&sp=r&rscd=attachment%3Bfilename%3D\"test.bin\"&rsct=application%2Foctet-stream&sig=";
+            Assert.Equal(suffix, url.Substring(url.IndexOf(suffix), suffix.Length));
         }
 
         [Fact]
@@ -101,15 +100,15 @@ namespace Lokad.ContentAddr.Tests
             var r = await store.WriteAsync(file, CancellationToken.None);
             var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var aNewBlob = await a.GetBlob();
-            aNewBlob.FetchAttributes();
-            var etag = aNewBlob.Properties.ETag;
+
+            var etag = aNewBlob.GetProperties()?.Value?.ETag;
 
             await store.WriteAsync(file, CancellationToken.None);
 
             var b = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var bNewBlob = await b.GetBlob();
-            bNewBlob.FetchAttributes();
-            Assert.Equal(etag, bNewBlob.Properties.ETag);
+
+            Assert.Equal(etag, bNewBlob.GetProperties()?.Value?.ETag);
         }
 
         [Fact]
@@ -126,17 +125,17 @@ namespace Lokad.ContentAddr.Tests
             var aNewBlob = await newBlobStore[hash].GetBlob();
             var aOldBlob = await reverseStore[hash].GetBlob();
 
-            Assert.True(await aOldBlob.ExistsAsync(null, null, CancellationToken.None));
-            Assert.False(await aNewBlob.ExistsAsync(null, null, CancellationToken.None));
+            Assert.True(await aOldBlob.ExistsAsync(CancellationToken.None));
+            Assert.False(await aNewBlob.ExistsAsync(CancellationToken.None));
 
             Assert.Equal(2048, await a.GetSizeAsync(CancellationToken.None));
             Stopwatch sw = new Stopwatch();
 
             while (sw.Elapsed < TimeSpan.FromSeconds(5) &&
-                !(await aNewBlob.ExistsAsync(null, null, CancellationToken.None))) ;
+                !(await aNewBlob.ExistsAsync(CancellationToken.None))) ;
 
-            await aNewBlob.FetchAttributesAsync(null, null, null, CancellationToken.None).ConfigureAwait(false);
-            Assert.Equal(2048, aNewBlob.Properties.Length);
+            
+            Assert.Equal(2048, aNewBlob.GetProperties()?.Value?.ContentLength);
         }
 
         [Fact]
@@ -164,7 +163,7 @@ namespace Lokad.ContentAddr.Tests
 
         protected byte[] Read(string key)
         {
-            var blob = NewPersistContainer.GetBlobReferenceFromServer(key);
+            var blob = NewPersistContainer.GetBlobClient(key);
             using (var stream = blob.OpenRead())
             {
                 var ms = new MemoryStream();

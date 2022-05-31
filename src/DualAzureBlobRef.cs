@@ -1,9 +1,10 @@
 ﻿using Lokad.Logging;
-using Microsoft.WindowsAzure.Storage.Blob;
+using Azure.Storage.Blobs;
 using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Azure.Storage.Blobs.Models;
 
 namespace Lokad.ContentAddr.Azure
 {
@@ -38,8 +39,8 @@ namespace Lokad.ContentAddr.Azure
         public DualAzureBlobRef(
             string realm,
             Hash hash,
-            CloudBlockBlob oldBlob,
-            CloudBlockBlob newBlob)
+            BlobClient oldBlob,
+            BlobClient newBlob)
         {
             Hash = hash;
             Realm = realm;
@@ -58,16 +59,16 @@ namespace Lokad.ContentAddr.Azure
         public string Realm { get; }
 
         /// <summary> The Azure Storage blob where the blob data might be stored if it exists on the old version of the storage. </summary>
-        public CloudBlockBlob OldBlob { get; }
+        public BlobClient OldBlob { get; }
 
         /// <summary> The Azure Storage blob where the blob data might be stored if it exists on the new version of the storage. </summary>
-        public CloudBlockBlob NewBlob { get; }
+        public BlobClient NewBlob { get; }
 
         /// <summary> The actual Storage blob where reading is performed : NewBlob if it exists, Oldblob otherwise
         /// </summary>
         private AzureBlobRef _chosen;
 
-        public async Task<CloudBlockBlob> GetBlob()
+        public async Task<BlobClient> GetBlob()
         {
             var chosen = await Chosen(CancellationToken.None).ConfigureAwait(false);
             return chosen.Blob;
@@ -84,11 +85,11 @@ namespace Lokad.ContentAddr.Azure
             _chosen = new AzureBlobRef(Realm, Hash, NewBlob);
             if (await AzureRetry.Do(NewBlob.ExistsAsync, cancel).ConfigureAwait(false))
             {
-                await AzureRetry.Do(
-                    c => NewBlob.FetchAttributesAsync(null, null, null, c),
-                    cancel).ConfigureAwait(false);
+                var props = await AzureRetry.Do(
+                            c => NewBlob.GetPropertiesAsync(cancellationToken: c),
+                            cancel).ConfigureAwait(false);
 
-                switch (NewBlob.CopyState.Status)
+                switch (props.Value.BlobCopyStatus)
                 {
                     case CopyStatus.Aborted:
                     case CopyStatus.Failed:
@@ -99,10 +100,6 @@ namespace Lokad.ContentAddr.Azure
                             _chosen = new AzureBlobRef(Realm, Hash, OldBlob);
                         }
                         break;
-                    case CopyStatus.Invalid:
-                        Log.InvalidBlob(Realm, NewBlob.Name);
-                        throw new InvalidOperationException(
-                            $"Copy for '{NewBlob.Name}' failed ({NewBlob.CopyState.Status})");
                     case CopyStatus.Pending:
                         if (await AzureRetry.Do(OldBlob.ExistsAsync, cancel).ConfigureAwait(false))
                         {
@@ -131,7 +128,7 @@ namespace Lokad.ContentAddr.Azure
         public async Task StartCopy(CancellationToken cancel)
         {
             var oldBlobRef = new AzureBlobRef(Realm, Hash, OldBlob);
-            if (!oldBlobRef.Blob.ServiceClient.Credentials.IsSAS)
+            if (!oldBlobRef.Blob.CanGenerateSasUri)
             {
                 // If possible, generate a download URL and use that as the copy
                 // source.
@@ -141,7 +138,7 @@ namespace Lokad.ContentAddr.Azure
                     "",
                     cancel).ConfigureAwait(false);
 
-                await AzureRetry.Do(c => NewBlob.StartCopyAsync(oldUri, c), cancel);
+                await AzureRetry.Do(c => NewBlob.StartCopyFromUriAsync(oldUri, cancellationToken: c), cancel);
             }
             else
             {
@@ -149,7 +146,7 @@ namespace Lokad.ContentAddr.Azure
                 // generate an URL, so we instead use the copy-from-blob primitive, 
                 // which is mostly equivalent (but can cause internal errors on the Azure
                 // side). 
-                await AzureRetry.Do(c => NewBlob.StartCopyAsync(oldBlobRef.Blob, c), cancel);
+                await AzureRetry.Do(c => NewBlob.StartCopyFromUriAsync(oldBlobRef.Blob.Uri, cancellationToken: c), cancel);
             }
         }
 

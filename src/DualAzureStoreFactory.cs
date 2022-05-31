@@ -1,5 +1,6 @@
-﻿using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -13,16 +14,16 @@ namespace Lokad.ContentAddr.Azure
     public sealed class DualAzureStoreFactory : IAzureStoreFactory
     {
         /// <summary> Staging blob container. </summary>
-        private readonly CloudBlobContainer _staging;
+        private readonly BlobContainerClient _staging;
 
         /// <summary> Old persistent blob container. </summary>
-        private readonly CloudBlobContainer _oldPersist;
+        private readonly BlobContainerClient _oldPersist;
 
         /// <summary> New persistent blob container. </summary>
-        private readonly CloudBlobContainer _newPersist;
+        private readonly BlobContainerClient _newPersist;
 
         /// <summary> Staging blob container. </summary>
-        private readonly CloudBlobContainer _archive;
+        private readonly BlobContainerClient _archive;
 
         /// <summary> Container prefix, if in testing. </summary>
         private readonly string _testPrefix;
@@ -31,13 +32,13 @@ namespace Lokad.ContentAddr.Azure
         public AzureWriter.OnCommit OnCommit { get; set; }
 
         /// <summary> The blob client of the new container
-        public CloudBlobClient BlobClient { get; }
+        public BlobServiceClient BlobClient { get; }
 
         public DualAzureStoreFactory(string oldConfig, string newConfig, bool readOnly = false, string testPrefix = null) :
-            this(CloudStorageAccount.Parse(oldConfig).CreateCloudBlobClient(), CloudStorageAccount.Parse(newConfig).CreateCloudBlobClient(), readOnly)
+            this(new BlobServiceClient(oldConfig), new BlobServiceClient(newConfig), readOnly)
         { }
 
-        public DualAzureStoreFactory(CloudBlobClient oldClient, CloudBlobClient newClient, bool readOnly = false, string testPrefix = null)
+        public DualAzureStoreFactory(BlobServiceClient oldClient, BlobServiceClient newClient, bool readOnly = false, string testPrefix = null)
         {
             var persistName = testPrefix == null ? "persist" : testPrefix + "-persist";
             var stagingName = testPrefix == null ? "staging" : testPrefix + "-staging";
@@ -45,17 +46,17 @@ namespace Lokad.ContentAddr.Azure
 
             _testPrefix = testPrefix;
             BlobClient = newClient;
-            _oldPersist = oldClient.GetContainerReference(persistName);
-            _newPersist = newClient.GetContainerReference(persistName);
+            _oldPersist = oldClient.GetBlobContainerClient(persistName);
+            _newPersist = newClient.GetBlobContainerClient(persistName);
 
             if (!readOnly)
             {
                 if (!_newPersist.Exists())
                     _newPersist.CreateIfNotExistsAsync().Wait();
-                _staging = newClient.GetContainerReference(stagingName);
+                _staging = newClient.GetBlobContainerClient(stagingName);
                 if (!_staging.Exists())
                     _staging.CreateIfNotExistsAsync().Wait();
-                _archive = newClient.GetContainerReference(archiveName);
+                _archive = newClient.GetBlobContainerClient(archiveName);
                 if (!_archive.Exists())
                     _archive.CreateIfNotExistsAsync().Wait();
             }
@@ -94,7 +95,7 @@ namespace Lokad.ContentAddr.Azure
         }
 
         /// <see cref="IStoreFactory.Describe"/>
-        public string Describe() => "[CAS] " + _newPersist.ServiceClient.BaseUri;
+        public string Describe() => "[CAS] " + _newPersist.Uri;
 
         /// <summary> Retrieve all accounts that have blobs in stores from this factory. </summary>
         /// <remarks> Accounts are sorted in ascending order. </remarks>
@@ -107,31 +108,29 @@ namespace Lokad.ContentAddr.Azure
         }
 
         /// <summary> Retrieve all accounts that have blobs in stores from this container. </summary>
-        private async Task<List<long>> GetAccountsAsync(CloudBlobContainer cbc, CancellationToken cancel)
+        private async Task<List<long>> GetAccountsAsync(BlobContainerClient cbc, CancellationToken cancel)
         {
             var accounts = new List<long>();
 
-            var token = default(BlobContinuationToken);
-
+            var token = default(string);
             do
             {
-                var result = await cbc.ListBlobsSegmentedAsync(
+                var result = cbc.GetBlobsByHierarchyAsync(traits: BlobTraits.Metadata,
+                    states: BlobStates.None,
                     prefix: "",
-                    useFlatBlobListing: false,
-                    blobListingDetails: BlobListingDetails.None,
-                    maxResults: null,
-                    currentToken: token,
-                    options: null,
-                    operationContext: null,
-                    cancellationToken: cancel).ConfigureAwait(false);
+                    cancellationToken: cancel)
+                    .AsPages(token);
 
-                foreach (var item in result.Results)
+                await foreach (var page in result)
                 {
-                    if (item is CloudBlobDirectory dir && long.TryParse(dir.Prefix.Trim('/'), out var account))
-                        accounts.Add(account);
-                }
+                    foreach (var item in page.Values)
+                    {
+                        if (item.IsPrefix && long.TryParse(item.Prefix.Trim('/'), out var account))
+                            accounts.Add(account);
+                    }
 
-                token = result.ContinuationToken;
+                    token = page.ContinuationToken;
+                }
 
             } while (token != null);
 

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>netstandard2.1</TargetFrameworks>
     <AssemblyName>Lokad.ContentAddr.Azure</AssemblyName>
     <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <OutputType>Library</OutputType>
@@ -12,7 +12,7 @@
     <FileVersion>1.1.0</FileVersion>
     <PackageId>Lokad.ContentAddr.Azure</PackageId>
     <PackageVersion>1.1.0</PackageVersion>
-    <LangVersion>7.2</LangVersion>
+    <LangVersion>8.0</LangVersion>
     <Version>1.1.0</Version>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
@@ -22,8 +22,9 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.12.0" />
     <PackageReference Include="Lokad.ContentAddr" Version="1.0.0" />
-    <PackageReference Include="Microsoft.Azure.Storage.Blob" Version="9.4.1" />
+    <PackageReference Include="System.Linq.Async" Version="6.0.1" />
     <PackageReference Include="System.Memory" Version="4.5.4" />
     <PackageReference Include="System.ValueTuple" Version="4.5.0" />
   </ItemGroup>

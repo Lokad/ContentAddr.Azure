@@ -1,11 +1,14 @@
 ﻿using Lokad.ContentAddr.Azure;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+using Azure;
+using Azure.Storage.Blobs;
 using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Xunit;
+using Azure.Storage.Blobs.Models;
+using System.Collections.Generic;
+using Xunit.Sdk;
 
 namespace Lokad.ContentAddr.Tests.Azure
 {
@@ -27,16 +30,15 @@ namespace Lokad.ContentAddr.Tests.Azure
             Data = data;
         }
 
-        private async Task<CloudBlob> Blob()
+        private async Task<BlobClient> Blob()
         {
-            var account = CloudStorageAccount.Parse(Connection);
-            var client = account.CreateCloudBlobClient();
-            var container = client.GetContainerReference("azure-read-stream");
+            var client = new BlobServiceClient(Connection);
+            var container = client.GetBlobContainerClient("azure-read-stream");
             await container.CreateIfNotExistsAsync().ConfigureAwait(false);
 
-            var blob = container.GetBlockBlobReference("large");
+            var blob = container.GetBlobClient("large");
             if (!await blob.ExistsAsync().ConfigureAwait(false))
-                await blob.UploadFromByteArrayAsync(Data, 0, Data.Length).ConfigureAwait(false);
+                await blob.UploadAsync(new BinaryData(Data)).ConfigureAwait(false);
 
             return blob;
         }

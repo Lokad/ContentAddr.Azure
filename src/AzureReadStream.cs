@@ -1,6 +1,9 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Storage.Sas;
 using System;
 using System.IO;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,7 +30,7 @@ namespace Lokad.ContentAddr.Azure
     public sealed class AzureReadStream : Stream
     {
         /// <summary> Read data from this blob. </summary>
-        private readonly CloudBlob _blob;
+        private readonly BlobClient _blob;
 
         /// <summary> The current position within the blob. </summary>
         private long _position;
@@ -54,7 +57,7 @@ namespace Lokad.ContentAddr.Azure
         /// </remarks>
         private int _bufferEnd;
 
-        public AzureReadStream(CloudBlob blob, long size)
+        public AzureReadStream(BlobClient blob, long size)
         {
             _blob = blob;
             Length = size;
@@ -70,7 +73,23 @@ namespace Lokad.ContentAddr.Azure
             if (count > 0)
             {
                 await AzureRetry.Do(
-                    c => _blob.DownloadRangeToByteArrayAsync(buffer, offset, position, count, null, null, null, c),
+                    async c =>
+                    {
+                        var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
+                                                               new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                        using (var httpClient = new HttpClient())
+                        {
+                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
+                            using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
+                            {
+                                using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
+                                {
+                                    await bodyStream.ReadAsync(buffer, offset, count, c);
+                                }
+                            }
+
+                        }
+                    },
                     cancel).ConfigureAwait(false);
 
                 // Change the state of the stream only after the read has succeeded. This way,
@@ -134,7 +153,24 @@ namespace Lokad.ContentAddr.Azure
                 DropSyncBuffer();
                 _position += count;
                 AzureRetry.Do(
-                    c => _blob.DownloadRangeToByteArrayAsync(buffer, offset, position, count, c),
+                    async c =>
+                    {
+                        var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
+                                                               new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                        using (var httpClient = new HttpClient())
+                        {
+                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
+                            using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
+                            {
+                                using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
+                                {
+                                    await bodyStream.ReadAsync(buffer, offset, count, c);
+                                }
+                            }
+
+                        }
+
+                    },
                     CancellationToken.None).Wait();
                 return count;
             }
@@ -198,9 +234,24 @@ namespace Lokad.ContentAddr.Azure
 
             _bufferOffset = 0;
             _bufferEnd = (int)Math.Min(_buffer.Length, Length - _position);
-
             AzureRetry.Do(
-                c => _blob.DownloadRangeToByteArrayAsync(_buffer, 0, _position, _bufferEnd, c),
+                async c =>
+                {
+                    var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
+                                                           new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                    using (var httpClient = new HttpClient())
+                    {
+                        httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={_position}-{_position + _bufferEnd - 1}");
+                        using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
+                        {
+                            using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
+                            {
+                                await bodyStream.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
+                            }
+                        }
+
+                    }
+                },
                 CancellationToken.None).Wait();
         }
 

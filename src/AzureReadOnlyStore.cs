@@ -1,5 +1,7 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,7 +18,7 @@ namespace Lokad.ContentAddr.Azure
     public class AzureReadOnlyStore : IAzureReadOnlyStore
     {
         /// <summary> The container where blobs are persisted. </summary>
-        protected CloudBlobContainer Persistent { get; }
+        protected BlobContainerClient Persistent { get; }
 
         /// <summary> The realm for this store. </summary>
         protected string Realm { get; }
@@ -24,7 +26,7 @@ namespace Lokad.ContentAddr.Azure
         /// <see cref="IReadOnlyStore.Realm"/>
         long IReadOnlyStore.Realm => long.Parse(Realm);
 
-        public AzureReadOnlyStore(string realm, CloudBlobContainer persistent)
+        public AzureReadOnlyStore(string realm, BlobContainerClient persistent)
         {
             Persistent = persistent;
             Realm = realm;
@@ -32,7 +34,7 @@ namespace Lokad.ContentAddr.Azure
 
         /// <see cref="IReadOnlyStore{TBlobRef}"/>
         public IAzureReadBlobRef this[Hash hash] =>
-            new AzureBlobRef(Realm, hash, Persistent.GetBlockBlobReference(AzureBlobName(Realm, hash)));
+            new AzureBlobRef(Realm, hash, Persistent.GetBlobClient(AzureBlobName(Realm, hash)));
 
         IReadBlobRef IReadOnlyStore.this[Hash hash] => this[hash];
 
@@ -46,7 +48,7 @@ namespace Lokad.ContentAddr.Azure
         public bool IsSameStore(IReadOnlyStore other)
         {
             if (other is AzureReadOnlyStore aros)
-                return aros.Persistent.StorageUri.PrimaryUri.Equals(Persistent.StorageUri.PrimaryUri) &&
+                return aros.Persistent.Uri.Equals(Persistent.Uri) &&
                        Realm == aros.Realm;
 
             return false;
@@ -61,30 +63,29 @@ namespace Lokad.ContentAddr.Azure
             var blobPrefix = $"{Realm}/{prefix:X2}";
             var count = 0;
 
-            var token = default(BlobContinuationToken);
+            var token = default(string);
             do
             {
-                var result = await Persistent.ListBlobsSegmentedAsync(
+                var result = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                    states: BlobStates.None,
                     prefix: blobPrefix,
-                    useFlatBlobListing: true,
-                    blobListingDetails: BlobListingDetails.Metadata,
-                    maxResults: null,
-                    currentToken: token,
-                    options: null,
-                    operationContext: null,
-                    cancellationToken: cancel).ConfigureAwait(false);
+                    cancellationToken: cancel)
+                    .AsPages(token);
 
-                foreach (var item in result.Results)
+                await foreach (var page in result)
                 {
-                    if (!(item is CloudBlob blob)) continue;
-                    if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
-                    if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
+                    foreach (var item in page.Values)
+                    {
+                        if (!(item is BlobItem blob)) continue;
+                        if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
+                        if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                    ++count;
-                    callback(hash, blob.Properties.Length, dto.UtcDateTime);
+                        ++count;
+                        callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
+                    }
+
+                    token = page.ContinuationToken;
                 }
-
-                token = result.ContinuationToken;
 
             } while (token != null);
 
@@ -97,27 +98,24 @@ namespace Lokad.ContentAddr.Azure
         {
             var blobPrefix = $"{Realm}/";
 
-            var token = default(BlobContinuationToken);
+            var token = default(string);
 
-            var result = await Persistent.ListBlobsSegmentedAsync(
+            var result = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                states: BlobStates.None,
                 prefix: blobPrefix,
-                useFlatBlobListing: true,
-                blobListingDetails: BlobListingDetails.Metadata,
-                maxResults: null,
-                currentToken: token,
-                options: null,
-                operationContext: null,
-                cancellationToken: cancel).ConfigureAwait(false);
+                cancellationToken: cancel)
+                .AsPages(token);
 
-            if (result.ContinuationToken != null) return false;
+            var firstPage = await result.FirstOrDefaultAsync(cancel);
+            if (firstPage.ContinuationToken != null) return false;
 
-            foreach (var item in result.Results)
+            foreach (var item in firstPage.Values)
             {
-                if (!(item is CloudBlob blob)) continue;
+                if (!(item is BlobItem blob)) continue;
                 if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
                 if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                callback(hash, blob.Properties.Length, dto.UtcDateTime);
+                callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
             }
 
             return true;

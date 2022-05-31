@@ -1,7 +1,7 @@
 ﻿using Lokad.ContentAddr.Azure;
 using Lokad.ContentAddr.Azure.Tests;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
+using Azure;
+using Azure.Storage.Blobs;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -17,29 +17,28 @@ namespace Lokad.ContentAddr.Tests
     {
         public static readonly string Connection = File.ReadAllText("azure_connection.txt");
 
-        protected CloudBlobClient Client;
+        protected BlobServiceClient Client;
 
-        protected CloudBlobContainer PersistContainer;
+        protected BlobContainerClient PersistContainer;
 
-        protected CloudBlobContainer StagingContainer;
+        protected BlobContainerClient StagingContainer;
 
-        protected CloudBlobContainer ArchiveContainer;
+        protected BlobContainerClient ArchiveContainer;
 
         protected string TestPrefix;
 
         public azure()
         {
-            var account = CloudStorageAccount.Parse(Connection);
-            Client = account.CreateCloudBlobClient();
+            Client = new BlobServiceClient(Connection);
             TestPrefix = Guid.NewGuid().ToString();
 
-            PersistContainer = Client.GetContainerReference(TestPrefix + "-persist");
+            PersistContainer = Client.GetBlobContainerClient(TestPrefix + "-persist");
             PersistContainer.CreateIfNotExists();
 
-            StagingContainer = Client.GetContainerReference(TestPrefix + "-staging");
+            StagingContainer = Client.GetBlobContainerClient(TestPrefix + "-staging");
             StagingContainer.CreateIfNotExists();
 
-            ArchiveContainer = Client.GetContainerReference(TestPrefix + "-archive");
+            ArchiveContainer = Client.GetBlobContainerClient(TestPrefix + "-archive");
             ArchiveContainer.CreateIfNotExists();
 
             Store = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer,
@@ -72,7 +71,7 @@ namespace Lokad.ContentAddr.Tests
             Assert.Equal("a/B2EA9F7FCEA831A4A63B213F41A8855B", aBlob.Name);
             Assert.True(await a.ExistsAsync(CancellationToken.None));
 
-            Assert.Equal(1024, aBlob.Properties.Length);
+            Assert.Equal(1024, aBlob.GetProperties()?.Value?.ContentLength);
 
             var url = (await a.GetDownloadUrlAsync(
                 TimeSpan.FromMinutes(20),
@@ -83,8 +82,8 @@ namespace Lokad.ContentAddr.Tests
             var prefix = PersistContainer.Uri + "/a/B2EA9F7FCEA831A4A63B213F41A8855B";
             Assert.Equal(prefix, url.Substring(0, prefix.Length));
 
-            var suffix = "&sp=r&rsct=application%2Foctet-stream&rscd=attachment%3Bfilename%3D\"test.bin\"";
-            Assert.Equal(suffix, url.Substring(url.Length - suffix.Length));
+            var suffix = "&sp=r&rscd=attachment%3Bfilename%3D\"test.bin\"&rsct=application%2Foctet-stream&sig=";
+            Assert.Equal(suffix, url.Substring(url.IndexOf(suffix), suffix.Length));
         }
 
         [Fact()]
@@ -141,15 +140,15 @@ namespace Lokad.ContentAddr.Tests
             var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var aBlob = await a.GetBlob();
 
-            aBlob.FetchAttributes();
-            var etag = aBlob.Properties.ETag;
+
+            var etag = aBlob.GetProperties()?.Value?.ETag;
 
             await store.WriteAsync(file, CancellationToken.None);
 
             var b = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var bBlob = await b.GetBlob();
-            bBlob.FetchAttributes();
-            Assert.Equal(etag, bBlob.Properties.ETag);
+
+            Assert.Equal(etag, bBlob.GetProperties()?.Value?.ETag);
         }
 
         protected static byte[] StringToBytes(string str) => Encoding.UTF8.GetBytes(str);
@@ -166,7 +165,7 @@ namespace Lokad.ContentAddr.Tests
 
         protected byte[] Read(string key)
         {
-            var blob = PersistContainer.GetBlobReferenceFromServer(key);
+            var blob = PersistContainer.GetBlobClient(key);
             using (var stream = blob.OpenRead())
             {
                 var ms = new MemoryStream();
@@ -181,15 +180,14 @@ namespace Lokad.ContentAddr.Tests
             "attachment%3Bfilename%3D\"filename.tsv\"")]
         [InlineData(
             "filenäme.tsv", // Non-ASCII character in filename
-            "attachment%3Bfilename%3D\"data.tsv\"%3Bfilename%2A%3DUTF-8%27%27filen%25c3%25a4me.tsv")]
+            "attachment%3Bfilename%3D\"data.tsv\"%3Bfilename*%3DUTF-8%27%27filen%25c3%25a4me.tsv")]
         public async Task ContentDisposition(string filename, string attach)
         {
-            var account = CloudStorageAccount.Parse(Connection);
-            var client = account.CreateCloudBlobClient();
+            var client = new BlobServiceClient(Connection);
 
-            var persistContainer = Client.GetContainerReference("contentdisposition-persist");
-            var stagingContainer = Client.GetContainerReference("contentdisposition-staging");
-            var archiveContainer = Client.GetContainerReference("contentdisposition-archive");
+            var persistContainer = Client.GetBlobContainerClient("contentdisposition-persist");
+            var stagingContainer = Client.GetBlobContainerClient("contentdisposition-staging");
+            var archiveContainer = Client.GetBlobContainerClient("contentdisposition-archive");
 
             var store = new AzureStore("a", persistContainer, stagingContainer, archiveContainer);
 
@@ -202,7 +200,7 @@ namespace Lokad.ContentAddr.Tests
                 CancellationToken.None).ConfigureAwait(false);
 
             Assert.Contains(".blob.core.windows.net/contentdisposition-persist/a/B2EA9F7FCEA831A4A63B213F41A8855B", url.ToString());
-            Assert.EndsWith(attach, url.ToString());
+            Assert.Contains(attach, url.ToString());
         }
     }
 }

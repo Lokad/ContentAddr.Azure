@@ -1,4 +1,4 @@
-﻿using Microsoft.WindowsAzure.Storage.Blob;
+﻿using Azure.Storage.Blobs;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,7 +21,7 @@ namespace Lokad.ContentAddr.Azure
         /// <summary>
         /// The client for the newest version of the storage
         /// </summary>
-        CloudBlobClient BlobClient { get; }
+        BlobServiceClient BlobClient { get; }
 
         void Delete();
 
