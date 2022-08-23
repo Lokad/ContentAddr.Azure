@@ -117,6 +117,7 @@ namespace Lokad.ContentAddr.Azure
                 traits: BlobTraits.None,
                 states: BlobStates.None,
                 prefix: "",
+                delimiter: "/",
                 cancellationToken: cancel).ToListAsync().ConfigureAwait(false);
 
             foreach (var item in result)
