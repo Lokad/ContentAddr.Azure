@@ -3,9 +3,6 @@ using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Specialized;
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -52,8 +49,8 @@ namespace Lokad.ContentAddr.Azure
         /// Wrapper around <see cref="BlobClient.PutBlockAsync"/> to perform a retry if we
         /// got a "ServerBusy" response.
         /// </summary>
-        private static Task PutBlockAsyncRetry(BlockBlobClient blob, string id, Stream ms, CancellationToken cancel) =>
-            ServerBusyRetry(() => blob.StageBlockAsync(id, ms, cancellationToken: cancel), cancel);
+        private static Task PutBlockAsyncRetry(BlockBlobClient blob, string id, ReadOnlyMemory<byte> buffer, CancellationToken cancel) =>
+            ServerBusyRetry(() => blob.StageBlockAsync(id, ReadOnlyMemoryStream.Create(buffer), cancellationToken: cancel), cancel);
 
         /// <summary>
         /// Wrapper around <see cref="BlobClient.PutBlockListAsync"/> to perform a retry if we
@@ -96,16 +93,14 @@ namespace Lokad.ContentAddr.Azure
             }
         }
 
-        /// <see cref="StoreWriter.DoWriteAsync"/>
+        /// <inheritdoc cref="StoreWriter.DoWriteAsync"/>
         /// <remarks>
         ///     The written data is uploaded as one or more Azure Blob blocks,
         ///     and the identifiers of those blocks are stored in the correct order
         ///     in <see cref="_blocks"/>.
         /// </remarks>
         protected override Task DoWriteAsync(
-            byte[] buffer,
-            int offset,
-            int count,
+            ReadOnlyMemory<byte> buffer,
             CancellationToken cancel)
         {
             // We might need to split data into multiple blocks, if the block size 
@@ -116,20 +111,19 @@ namespace Lokad.ContentAddr.Azure
             // up until the first 'await', so we want to update '_blocks' fully before that
             // happens.
 
-            var blocks = count / azureMax + (count % azureMax == 0 ? 0 : 1);
+            var blocks = buffer.Length / azureMax + (buffer.Length % azureMax == 0 ? 0 : 1);
 
             if (blocks == 1)
             {
                 var id = Guid.NewGuid().ToString("N");
-                var ms = new MemoryStream(buffer, offset, count);
                 _blocks.Add(id);
 
                 var task = Temporary != null
-                    ? PutBlockAsyncRetry(Temporary, id, ms, cancel)
+                    ? PutBlockAsyncRetry(Temporary, id, buffer, cancel)
                     : Task.Run(async () =>
                     {
                         var t = await _temporaryTask;
-                        await PutBlockAsyncRetry(t, id, ms, cancel);
+                        await PutBlockAsyncRetry(t, id, buffer, cancel);
                     }, cancel);
 
                 _tasks.Add(task);
@@ -140,25 +134,26 @@ namespace Lokad.ContentAddr.Azure
             var uploads = new Task[blocks];
 
             var block = 0;
-            var end = offset + count;
-            while (offset < end)
+            var start = 0;
+            var end = buffer.Length;
+            while (start < end)
             {
                 var id = Guid.NewGuid().ToString("N");
-                var written = Math.Min(end - offset, azureMax);
-                var ms = new MemoryStream(buffer, offset, written);
+                var written = Math.Min(end - start, azureMax);
+                var subBuffer = buffer.Slice(start, written);
 
                 var task = Temporary == null
                     ? Task.Run(async () =>
                         {
                             var t = await _temporaryTask;
-                            await PutBlockAsyncRetry(t, id, ms, cancel);
+                            await PutBlockAsyncRetry(t, id, subBuffer, cancel);
                         }, cancel)
-                    : PutBlockAsyncRetry(Temporary, id, ms, cancel);
+                    : PutBlockAsyncRetry(Temporary, id, subBuffer, cancel);
 
                 _blocks.Add(id);
                 _tasks.Add(uploads[block++] = task);
 
-                offset += written;
+                start += written;
             }
 
             return Task.WhenAll(uploads);
