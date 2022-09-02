@@ -1,5 +1,4 @@
 ﻿using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
 using System;
 using System.IO;
@@ -63,6 +62,18 @@ namespace Lokad.ContentAddr.Azure
             Length = size;
         }
 
+        /// <summary>
+        ///     Produce an URL that can be used to download the blob (or part of the blob).
+        /// </summary>
+        private static Uri DownloadUrl(BlobClient blob) =>
+            blob.CanGenerateSasUri
+                ? blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
+                                        new DateTimeOffset(DateTime.UtcNow.AddDays(1))))
+                // If the authentication model cannot support the generation of a SAS URI, we
+                // expect it's because the original connection mode is already based on a SAS,
+                // and so the blob's URI should already include the SAS.
+                : blob.Uri;
+
         /// <see cref="Stream.ReadAsync(byte[],int,int,CancellationToken)"/>
         public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancel)
         {
@@ -75,8 +86,8 @@ namespace Lokad.ContentAddr.Azure
                 await AzureRetry.Do(
                     async c =>
                     {
-                        var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
-                                                               new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                        var downloadUrl = DownloadUrl(_blob);
+
                         using (var httpClient = new HttpClient())
                         {
                             httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
@@ -155,8 +166,8 @@ namespace Lokad.ContentAddr.Azure
                 AzureRetry.Do(
                     async c =>
                     {
-                        var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
-                                                               new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                        var downloadUrl = DownloadUrl(_blob);
+
                         using (var httpClient = new HttpClient())
                         {
                             httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
@@ -237,8 +248,8 @@ namespace Lokad.ContentAddr.Azure
             AzureRetry.Do(
                 async c =>
                 {
-                    var downloadUrl = _blob.GenerateSasUri(new BlobSasBuilder(BlobContainerSasPermissions.Read,
-                                                           new DateTimeOffset(DateTime.UtcNow.AddDays(1))));
+                    var downloadUrl = DownloadUrl(_blob);
+
                     using (var httpClient = new HttpClient())
                     {
                         httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={_position}-{_position + _bufferEnd - 1}");
