@@ -8,16 +8,18 @@ namespace Lokad.ContentAddr.Azure.Tests
 {
     public abstract class UploadFixture
     {
-        protected IStore<IReadBlobRef> Store { get; set; }
+        protected IWriteOnlyStore WriteStore { get; set; }
+
+        protected IReadOnlyStore<IReadBlobRef> ReadStore { get; set; }
 
         [Fact]
         public async Task empty()
         {
-            var r = await Store.WriteAsync(new byte[0], CancellationToken.None);
+            var r = await WriteStore.WriteAsync(new byte[0], CancellationToken.None);
             Assert.Equal("D41D8CD98F00B204E9800998ECF8427E", r.Hash.ToString());
             Assert.Equal(0, r.Size);
 
-            var a = Store[new Hash("D41D8CD98F00B204E9800998ECF8427E")];
+            var a = ReadStore[new Hash("D41D8CD98F00B204E9800998ECF8427E")];
 
             Assert.True(await a.ExistsAsync(CancellationToken.None));
             Assert.Equal(0, await a.GetSizeAsync(CancellationToken.None));
@@ -37,11 +39,11 @@ namespace Lokad.ContentAddr.Azure.Tests
 
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", hash.ToString());
 
-            var r = await Store.WriteAsync(file, CancellationToken.None);
+            var r = await WriteStore.WriteAsync(file, CancellationToken.None);
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", r.Hash.ToString());
             Assert.Equal(1024, r.Size);
 
-            var a = Store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+            var a = ReadStore[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
 
             Assert.True(await a.ExistsAsync(CancellationToken.None));
             Assert.Equal(1024, await a.GetSizeAsync(CancellationToken.None));
@@ -59,11 +61,11 @@ namespace Lokad.ContentAddr.Azure.Tests
         {
             var file = FakeFile(1024 * 2);
 
-            var r = await Store.WriteAsync(file, 256, 1024, CancellationToken.None);
+            var r = await WriteStore.WriteAsync(file, 256, 1024, CancellationToken.None);
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", r.Hash.ToString());
             Assert.Equal(1024, r.Size);
 
-            var a = Store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+            var a = ReadStore[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
 
             Assert.True(await a.ExistsAsync(CancellationToken.None));
             Assert.Equal(1024, await a.GetSizeAsync(CancellationToken.None));
@@ -82,7 +84,7 @@ namespace Lokad.ContentAddr.Azure.Tests
             var file = FakeFile(1024);
 
             WrittenBlob r;
-            using (var w = Store.StartWriting())
+            using (var w = WriteStore.StartWriting())
             {
                 for (var i = 0; i < file.Length; i += 256)
                     await w.WriteAsync(file, i, 256, CancellationToken.None);
@@ -93,7 +95,7 @@ namespace Lokad.ContentAddr.Azure.Tests
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", r.Hash.ToString());
             Assert.Equal(1024, r.Size);
 
-            var a = Store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+            var a = ReadStore[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
 
             Assert.True(await a.ExistsAsync(CancellationToken.None));
             Assert.Equal(1024, await a.GetSizeAsync(CancellationToken.None));
@@ -112,7 +114,7 @@ namespace Lokad.ContentAddr.Azure.Tests
             var file = FakeFile(1024);
 
             WrittenBlob r;
-            using (var w = Store.StartWriting())
+            using (var w = WriteStore.StartWriting())
             {
                 var pos = 0;
                 await w.WriteAsync((bytes, offset, count, cancel) =>
@@ -143,7 +145,7 @@ namespace Lokad.ContentAddr.Azure.Tests
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", r.Hash.ToString());
             Assert.Equal(1024, r.Size);
 
-            var a = Store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+            var a = ReadStore[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
 
             Assert.True(await a.ExistsAsync(CancellationToken.None));
             Assert.Equal(1024, await a.GetSizeAsync(CancellationToken.None));
@@ -165,11 +167,11 @@ namespace Lokad.ContentAddr.Azure.Tests
 
             Assert.Equal("2A43A3F3D5B1A13F0B4C3369040D0919", hash.ToString());
 
-            var r = await Store.WriteAsync(file, CancellationToken.None);
+            var r = await WriteStore.WriteAsync(file, CancellationToken.None);
             Assert.Equal("2A43A3F3D5B1A13F0B4C3369040D0919", r.Hash.ToString());
             Assert.Equal(1024 * 1024 * 9, r.Size);
 
-            var a = Store[new Hash("2A43A3F3D5B1A13F0B4C3369040D0919")];
+            var a = ReadStore[new Hash("2A43A3F3D5B1A13F0B4C3369040D0919")];
 
             Assert.True(await a.ExistsAsync(CancellationToken.None));
             Assert.Equal(1024 * 1024 * 9, await a.GetSizeAsync(CancellationToken.None));

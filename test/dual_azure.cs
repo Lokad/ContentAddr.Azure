@@ -47,7 +47,9 @@ namespace Lokad.ContentAddr.Tests
             ArchiveContainer = NewClient.GetBlobContainerClient(TestPrefix + "-archive");
             ArchiveContainer.CreateIfNotExists();
 
-            Store = new DualAzureStore("a", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer);
+            var store = new DualAzureStore("a", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer);
+            WriteStore = store;
+            ReadStore = store;
         }
 
         public void Dispose()
@@ -62,7 +64,7 @@ namespace Lokad.ContentAddr.Tests
         {
             var file = FakeFile(1024);
             var hash = Md5(file);
-            var store = (DualAzureStore)Store;
+            var store = (DualAzureStore)WriteStore;
 
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", hash.ToString());
 
@@ -95,7 +97,7 @@ namespace Lokad.ContentAddr.Tests
         public async Task small_preserve_etag()
         {
             var file = FakeFile(1024);
-            var store = (DualAzureStore)Store;
+            var store = (DualAzureStore)WriteStore;
 
             var r = await store.WriteAsync(file, CancellationToken.None);
             var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];

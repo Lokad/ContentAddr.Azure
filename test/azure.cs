@@ -1,6 +1,5 @@
 ﻿using Lokad.ContentAddr.Azure;
 using Lokad.ContentAddr.Azure.Tests;
-using Azure;
 using Azure.Storage.Blobs;
 using System;
 using System.Collections.Generic;
@@ -41,15 +40,19 @@ namespace Lokad.ContentAddr.Tests
             ArchiveContainer = Client.GetBlobContainerClient(TestPrefix + "-archive");
             ArchiveContainer.CreateIfNotExists();
 
-            Store = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer,
+            var store = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer,
                 (elapsed, realm, hash, size, existed) =>
                     Console.WriteLine("[{4}] {0} {1}/{2} {3} bytes", existed ? "OLD" : "NEW", realm, hash, size, elapsed));
+
+            WriteStore = store;
+            ReadStore = store;
         }
 
         public void Dispose()
         {
             try { PersistContainer.DeleteIfExists(); } catch { }
             try { StagingContainer.DeleteIfExists(); } catch { }
+            try { ArchiveContainer.DeleteIfExists(); } catch { }
         }
 
         [Fact]
@@ -57,7 +60,7 @@ namespace Lokad.ContentAddr.Tests
         {
             var file = FakeFile(1024);
             var hash = Md5(file);
-            var store = (AzureStore)Store;
+            var store = (AzureStore)WriteStore;
 
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", hash.ToString());
 
@@ -91,7 +94,7 @@ namespace Lokad.ContentAddr.Tests
         {
             var file = FakeFile(1024);
             var hash = Md5(file);
-            var store = (AzureStore)Store;
+            var store = (AzureStore)WriteStore;
 
             Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", hash.ToString());
 
@@ -134,7 +137,7 @@ namespace Lokad.ContentAddr.Tests
         public async Task small_preserve_etag()
         {
             var file = FakeFile(1024);
-            var store = (AzureStore)Store;
+            var store = (AzureStore)WriteStore;
 
             var r = await store.WriteAsync(file, CancellationToken.None);
             var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
