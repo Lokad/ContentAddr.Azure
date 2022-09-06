@@ -28,6 +28,11 @@ namespace Lokad.ContentAddr.Azure
     /// </remarks>
     public sealed class AzureReadStream : Stream
     {
+        /// <summary>
+        ///     The HTTP client object used by all streams to make requests.
+        /// </summary>
+        public static readonly HttpClient SharedHttpClient = new HttpClient();
+
         /// <summary> Read data from this blob. </summary>
         private readonly BlobClient _blob;
 
@@ -87,19 +92,13 @@ namespace Lokad.ContentAddr.Azure
                     async c =>
                     {
                         var downloadUrl = DownloadUrl(_blob);
+                        var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+                        request.Headers.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
 
-                        using (var httpClient = new HttpClient())
-                        {
-                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
-                            using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
-                            {
-                                using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
-                                {
-                                    await bodyStream.ReadAsync(buffer, offset, count, c);
-                                }
-                            }
-
-                        }
+                        using var getResponse = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
+                        using var bodyStream = await getResponse.Content.ReadAsStreamAsync();
+                        
+                        await bodyStream.ReadAsync(buffer, offset, count, c);
                     },
                     cancel).ConfigureAwait(false);
 
@@ -168,19 +167,13 @@ namespace Lokad.ContentAddr.Azure
                     {
                         var downloadUrl = DownloadUrl(_blob);
 
-                        using (var httpClient = new HttpClient())
-                        {
-                            httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
-                            using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
-                            {
-                                using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
-                                {
-                                    await bodyStream.ReadAsync(buffer, offset, count, c);
-                                }
-                            }
+                        var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+                        request.Headers.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
 
-                        }
+                        using var getResponse = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
+                        using var bodyStream = await getResponse.Content.ReadAsStreamAsync();
 
+                        await bodyStream.ReadAsync(buffer, offset, count, c);
                     },
                     CancellationToken.None).Wait();
                 return count;
@@ -250,18 +243,13 @@ namespace Lokad.ContentAddr.Azure
                 {
                     var downloadUrl = DownloadUrl(_blob);
 
-                    using (var httpClient = new HttpClient())
-                    {
-                        httpClient.DefaultRequestHeaders.Add("x-ms-range", $"bytes={_position}-{_position + _bufferEnd - 1}");
-                        using (var getResponse = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseContentRead))
-                        {
-                            using (var bodyStream = await getResponse.Content.ReadAsStreamAsync())
-                            {
-                                await bodyStream.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
-                            }
-                        }
+                    var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+                    request.Headers.Add("x-ms-range", $"bytes={_position}-{_position + _bufferEnd - 1}");
 
-                    }
+                    using var getResponse = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
+                    using var bodyStream = await getResponse.Content.ReadAsStreamAsync();
+
+                    await bodyStream.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
                 },
                 CancellationToken.None).Wait();
         }
