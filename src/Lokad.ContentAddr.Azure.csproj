@@ -8,12 +8,12 @@
     <Company>Lokad</Company>
     <Copyright>Copyright © Lokad 2021-2022</Copyright>
 
-    <AssemblyVersion>3.0.2.0</AssemblyVersion>
-    <FileVersion>3.0.2</FileVersion>
+    <AssemblyVersion>3.0.3.0</AssemblyVersion>
+    <FileVersion>3.0.3</FileVersion>
     <PackageId>Lokad.ContentAddr.Azure</PackageId>
-    <PackageVersion>3.0.2</PackageVersion>
+    <PackageVersion>3.0.3</PackageVersion>
     <LangVersion>8.0</LangVersion>
-    <Version>3.0.2</Version>
+    <Version>3.0.3</Version>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageIcon>lokad.png</PackageIcon>
