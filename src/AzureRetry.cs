@@ -82,6 +82,8 @@ namespace Lokad.ContentAddr.Azure
 
             while (true)
             {
+                cancel.ThrowIfCancellationRequested();
+
                 try
                 {
                     using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancel))
