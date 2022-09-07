@@ -1,8 +1,8 @@
-﻿using Azure.Storage.Blobs;
+﻿using Azure;
+using Azure.Storage.Blobs;
 using Azure.Storage.Sas;
 using System;
 using System.IO;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -28,11 +28,6 @@ namespace Lokad.ContentAddr.Azure
     /// </remarks>
     public sealed class AzureReadStream : Stream
     {
-        /// <summary>
-        ///     The HTTP client object used by all streams to make requests.
-        /// </summary>
-        public static readonly HttpClient SharedHttpClient = new HttpClient();
-
         /// <summary> Read data from this blob. </summary>
         private readonly BlobClient _blob;
 
@@ -89,17 +84,7 @@ namespace Lokad.ContentAddr.Azure
             if (count > 0)
             {
                 await AzureRetry.Do(
-                    async c =>
-                    {
-                        var downloadUrl = DownloadUrl(_blob);
-                        var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
-                        request.Headers.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
-
-                        using var getResponse = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
-                        using var bodyStream = await getResponse.Content.ReadAsStreamAsync();
-                        
-                        await bodyStream.ReadAsync(buffer, offset, count, c);
-                    },
+                    c => DownloadRangeAsync(_blob, buffer, offset, position, count, c),
                     cancel).ConfigureAwait(false);
 
                 // Change the state of the stream only after the read has succeeded. This way,
@@ -109,6 +94,28 @@ namespace Lokad.ContentAddr.Azure
             }
 
             return count;
+        }
+
+        /// <summary>
+        ///     Downloads a range of data from <paramref name="blob"/>, starting at position <paramref name="sourceOffset"/> and
+        ///     length <paramref name="count"/> bytes. Data is written to buffer <paramref name="into"/> starting at 
+        ///     position <paramref name="intoOffset"/>.
+        /// </summary>
+        public static async Task DownloadRangeAsync(BlobClient blob, byte[] into, int intoOffset, long sourceOffset, int count, CancellationToken cancel)
+        {
+            var result = await blob.DownloadStreamingAsync(
+                new HttpRange(sourceOffset, count),
+                cancellationToken: cancel);
+
+            using var stream = result.Value.Content;
+
+            while (count > 0)
+            {
+                var read = await stream.ReadAsync(into, intoOffset, count);
+                if (read == 0) throw new InvalidOperationException("Unexpected end-of-stream on DownloadStreamingAsync");
+                intoOffset += read;
+                count -= read;
+            }
         }
 
         /// <see cref="Stream.Flush"/>
@@ -163,18 +170,7 @@ namespace Lokad.ContentAddr.Azure
                 DropSyncBuffer();
                 _position += count;
                 AzureRetry.Do(
-                    async c =>
-                    {
-                        var downloadUrl = DownloadUrl(_blob);
-
-                        var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
-                        request.Headers.Add("x-ms-range", $"bytes={position}-{position + count - 1}");
-
-                        using var getResponse = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
-                        using var bodyStream = await getResponse.Content.ReadAsStreamAsync();
-
-                        await bodyStream.ReadAsync(buffer, offset, count, c);
-                    },
+                    c => DownloadRangeAsync(_blob, buffer, offset, position, count, c),
                     CancellationToken.None).Wait();
                 return count;
             }
@@ -239,18 +235,7 @@ namespace Lokad.ContentAddr.Azure
             _bufferOffset = 0;
             _bufferEnd = (int)Math.Min(_buffer.Length, Length - _position);
             AzureRetry.Do(
-                async c =>
-                {
-                    var downloadUrl = DownloadUrl(_blob);
-
-                    var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
-                    request.Headers.Add("x-ms-range", $"bytes={_position}-{_position + _bufferEnd - 1}");
-
-                    using var getResponse = await SharedHttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead);
-                    using var bodyStream = await getResponse.Content.ReadAsStreamAsync();
-
-                    await bodyStream.ReadAsync(_buffer, _bufferOffset, _bufferEnd, c);
-                },
+                c => DownloadRangeAsync(_blob, _buffer, 0, _position, _bufferEnd, c),
                 CancellationToken.None).Wait();
         }
 
