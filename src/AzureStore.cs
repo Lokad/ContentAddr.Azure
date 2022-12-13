@@ -3,10 +3,13 @@ using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Blobs.Specialized;
 using Azure.Storage.Sas;
+using Newtonsoft.Json;
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -48,7 +51,8 @@ namespace Lokad.ContentAddr.Azure
             BlobContainerClient persistent,
             BlobContainerClient staging,
             BlobContainerClient archive,
-            AzureWriter.OnCommit onCommit = null) : base(realm, persistent)
+            BlobContainerClient deleted,
+            AzureWriter.OnCommit onCommit = null) : base(realm, persistent, deleted)
         {
             _onCommit = onCommit;
             Staging = staging;
@@ -77,7 +81,6 @@ namespace Lokad.ContentAddr.Azure
             var blob = Staging.GetBlobClient(name);
             var url = blob.GenerateSasUri(BlobSasPermissions.Write | BlobSasPermissions.Delete,
                 expiresOn: new DateTimeOffset(DateTime.UtcNow + life));
-
 
             return url;
         }
@@ -237,7 +240,7 @@ namespace Lokad.ContentAddr.Azure
                 DeleteBlob(temporary, TimeSpan.FromMinutes(10));
             }
 
-            return new AzureBlobRef(Realm, hash, final);
+            return new AzureBlobRef(Realm, hash, final, Deleted);
         }
 
         /// <summary> Delete a block after a short wait. </summary>
@@ -288,5 +291,44 @@ namespace Lokad.ContentAddr.Azure
                 }
             }
         }
+
+        /// <summary>
+        /// Get properties of blob to save its creation date and its size in the blob container deleted as a json <see cref="AzureDeletedBlobInfo"/>.
+        /// Realm and hash are used the same way as in Persistent to name this new blob.
+        /// Blob is then deleted.
+        /// </summary>
+        /// <param name="hash"> The hash of the blob to be deleted. </param>
+        /// <param name="reason"> A string containing the reason for the deletion (human-readable). </param>
+        /// <param name="cancel"> Cancellation token. </param>
+        public async Task DeleteWithReasonAsync(Hash hash, string reason, CancellationToken cancel)
+        {
+            var blobToDelete = Persistent.GetBlobClient(AzureBlobName(Realm, hash));
+            var blobDeleted = Deleted.GetBlobClient(AzureBlobName(Realm, hash));
+
+            AzureDeletedBlobInfo azureDeletedBlobInfo;
+            try
+            {
+                var props = await blobToDelete.GetPropertiesAsync(cancellationToken: cancel).ConfigureAwait(false);
+
+                azureDeletedBlobInfo = new AzureDeletedBlobInfo
+                {
+                    Created = props.Value.CreatedOn.DateTime,
+                    Deleted = DateTime.Now,
+                    Reason = reason,
+                    Size = props.Value.ContentLength,
+                };
+            }
+            catch (RequestFailedException e) when (e.Status == 404)
+            {
+                throw await AzureBlobRef.ReadDeletedBlobAsync(Deleted, Realm, hash, cancel).ConfigureAwait(false);
+            }
+
+            string json = JsonConvert.SerializeObject(azureDeletedBlobInfo);
+            using (MemoryStream ms = new MemoryStream(Encoding.UTF8.GetBytes(json)))
+            {
+                await blobDeleted.UploadAsync(ms, new BlobUploadOptions { AccessTier = AccessTier.Cool }, cancel);
+            }
+            await blobToDelete.DeleteAsync(DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancel).ConfigureAwait(false);
+        }            
     }
 }

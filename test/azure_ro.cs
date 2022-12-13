@@ -25,6 +25,8 @@ namespace Lokad.ContentAddr.Tests
 
         protected BlobContainerClient ArchiveContainer;
 
+        protected BlobContainerClient DeletedContainer;
+
         protected string TestPrefix;
 
         public azure_ro()
@@ -41,7 +43,10 @@ namespace Lokad.ContentAddr.Tests
             ArchiveContainer = Client.GetBlobContainerClient(TestPrefix + "-archive");
             ArchiveContainer.CreateIfNotExists();
 
-            WriteStore = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer,
+            DeletedContainer = Client.GetBlobContainerClient(TestPrefix + "-deleted");
+            DeletedContainer.CreateIfNotExists();
+
+            WriteStore = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer, DeletedContainer,
                 (elapsed, realm, hash, size, existed) =>
                     Console.WriteLine("[{4}] {0} {1}/{2} {3} bytes", existed ? "OLD" : "NEW", realm, hash, size, elapsed));
 
@@ -51,7 +56,7 @@ namespace Lokad.ContentAddr.Tests
 
             var newPersistContainer = new BlobContainerClient(persistSas);
 
-            ReadStore = new AzureReadOnlyStore("a", newPersistContainer);
+            ReadStore = new AzureReadOnlyStore("a", newPersistContainer, DeletedContainer);
         }
 
         public void Dispose()
@@ -59,6 +64,7 @@ namespace Lokad.ContentAddr.Tests
             try { PersistContainer.DeleteIfExists(); } catch { }
             try { StagingContainer.DeleteIfExists(); } catch { }
             try { ArchiveContainer.DeleteIfExists(); } catch { }
+            try { DeletedContainer.DeleteIfExists(); } catch { }
         }
     }
 }

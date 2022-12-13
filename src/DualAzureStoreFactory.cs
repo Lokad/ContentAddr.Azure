@@ -1,5 +1,4 @@
-﻿using Azure;
-using Azure.Storage.Blobs;
+﻿using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using System;
 using System.Collections.Generic;
@@ -25,6 +24,9 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> Staging blob container. </summary>
         private readonly BlobContainerClient _archive;
 
+        /// <summary> Deleted blob container. </summary>
+        private readonly BlobContainerClient _deleted;
+
         /// <summary> Container prefix, if in testing. </summary>
         private readonly string _testPrefix;
 
@@ -35,7 +37,7 @@ namespace Lokad.ContentAddr.Azure
         public BlobServiceClient BlobClient { get; }
 
         public DualAzureStoreFactory(string oldConfig, string newConfig, bool readOnly = false, string testPrefix = null) :
-            this(new BlobServiceClient(oldConfig), new BlobServiceClient(newConfig), readOnly)
+            this(new BlobServiceClient(oldConfig), new BlobServiceClient(newConfig), readOnly, testPrefix)
         { }
 
         public DualAzureStoreFactory(BlobServiceClient oldClient, BlobServiceClient newClient, bool readOnly = false, string testPrefix = null)
@@ -43,11 +45,13 @@ namespace Lokad.ContentAddr.Azure
             var persistName = testPrefix == null ? "persist" : testPrefix + "-persist";
             var stagingName = testPrefix == null ? "staging" : testPrefix + "-staging";
             var archiveName = testPrefix == null ? "archive" : testPrefix + "-archive";
+            var deletedName = testPrefix == null ? "deleted" : testPrefix + "-deleted";
 
             _testPrefix = testPrefix;
             BlobClient = newClient;
             _oldPersist = oldClient.GetBlobContainerClient(persistName);
             _newPersist = newClient.GetBlobContainerClient(persistName);
+            _deleted = newClient.GetBlobContainerClient(deletedName);
 
             if (!readOnly)
             {
@@ -59,8 +63,10 @@ namespace Lokad.ContentAddr.Azure
                 _archive = newClient.GetBlobContainerClient(archiveName);
                 if (!_archive.Exists())
                     _archive.CreateIfNotExistsAsync().Wait();
+                _deleted = newClient.GetBlobContainerClient(deletedName);
+                if (!_deleted.Exists())
+                    _deleted.CreateIfNotExistsAsync().Wait();
             }
-
         }
 
         /// <summary> A read-write store for the specified account. </summary>
@@ -69,7 +75,7 @@ namespace Lokad.ContentAddr.Azure
             if (_staging == null)
                 throw new InvalidOperationException("Cannot use 'ForAccount' in read-only mode.");
 
-            return new DualAzureStore(account.ToString(CultureInfo.InvariantCulture), _oldPersist, _newPersist, _staging, _archive, OnCommit);
+            return new DualAzureStore(account.ToString(CultureInfo.InvariantCulture), _oldPersist, _newPersist, _staging, _archive, _deleted, OnCommit);
         }
 
         /// <see cref="IStoreFactory.this"/>
@@ -81,7 +87,7 @@ namespace Lokad.ContentAddr.Azure
 
         /// <summary> A read-only store for the specified account. </summary>
         public IAzureReadOnlyStore ReadOnlyForAccount(long account) =>
-            new DualAzureReadOnlyStore(account.ToString(CultureInfo.InvariantCulture), _oldPersist, _newPersist);
+            new DualAzureReadOnlyStore(account.ToString(CultureInfo.InvariantCulture), _oldPersist, _newPersist, _deleted);
 
         /// <summary> Deletes all contents. Only available when testing. </summary>
         public void Delete()
@@ -92,6 +98,7 @@ namespace Lokad.ContentAddr.Azure
             _newPersist.DeleteIfExistsAsync().Wait();
             _oldPersist.DeleteIfExistsAsync().Wait();
             _staging.DeleteIfExistsAsync().Wait();
+            _deleted.DeleteIfExistsAsync().Wait();
         }
 
         /// <see cref="IStoreFactory.Describe"/>
@@ -136,8 +143,6 @@ namespace Lokad.ContentAddr.Azure
 
             return accounts;
         }
-
-
     }
 }
 

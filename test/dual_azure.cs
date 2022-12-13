@@ -26,6 +26,7 @@ namespace Lokad.ContentAddr.Tests
         protected BlobContainerClient NewPersistContainer;
         protected BlobContainerClient StagingContainer;
         protected BlobContainerClient ArchiveContainer;
+        protected BlobContainerClient DeletedContainer;
 
         protected string TestPrefix;
 
@@ -47,7 +48,10 @@ namespace Lokad.ContentAddr.Tests
             ArchiveContainer = NewClient.GetBlobContainerClient(TestPrefix + "-archive");
             ArchiveContainer.CreateIfNotExists();
 
-            var store = new DualAzureStore("a", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer);
+            DeletedContainer = NewClient.GetBlobContainerClient(TestPrefix + "-deleted");
+            DeletedContainer.CreateIfNotExists();
+
+            var store = new DualAzureStore("a", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer, DeletedContainer);
             WriteStore = store;
             ReadStore = store;
         }
@@ -57,6 +61,7 @@ namespace Lokad.ContentAddr.Tests
             try { NewPersistContainer.DeleteIfExists(); } catch { }
             try { OldPersistContainer.DeleteIfExists(); } catch { }
             try { StagingContainer.DeleteIfExists(); } catch { }
+            try { DeletedContainer.DeleteIfExists(); } catch { }
         }
 
         [Fact]
@@ -118,9 +123,9 @@ namespace Lokad.ContentAddr.Tests
         {
             var file = FakeFile(2048);
             var hash = Md5(file);
-            var store = new DualAzureStore("b", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer);
-            var reverseStore = new DualAzureStore("b", NewPersistContainer, OldPersistContainer, StagingContainer, ArchiveContainer);
-            var newBlobStore = new AzureStore("b", NewPersistContainer, StagingContainer, ArchiveContainer);
+            var store = new DualAzureStore("b", OldPersistContainer, NewPersistContainer, StagingContainer, ArchiveContainer, DeletedContainer);
+            var reverseStore = new DualAzureStore("b", NewPersistContainer, OldPersistContainer, StagingContainer, ArchiveContainer, DeletedContainer);
+            var newBlobStore = new AzureStore("b", NewPersistContainer, StagingContainer, ArchiveContainer, DeletedContainer);
 
             await reverseStore.WriteAsync(file, CancellationToken.None);
             var a = store[hash];

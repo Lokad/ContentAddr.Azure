@@ -24,6 +24,8 @@ namespace Lokad.ContentAddr.Tests
 
         protected BlobContainerClient ArchiveContainer;
 
+        protected BlobContainerClient DeletedContainer;
+
         protected string TestPrefix;
 
         public azure()
@@ -40,7 +42,10 @@ namespace Lokad.ContentAddr.Tests
             ArchiveContainer = Client.GetBlobContainerClient(TestPrefix + "-archive");
             ArchiveContainer.CreateIfNotExists();
 
-            var store = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer,
+            DeletedContainer = Client.GetBlobContainerClient(TestPrefix + "-deleted");
+            DeletedContainer.CreateIfNotExists();
+
+            var store = new AzureStore("a", PersistContainer, StagingContainer, ArchiveContainer, DeletedContainer,
                 (elapsed, realm, hash, size, existed) =>
                     Console.WriteLine("[{4}] {0} {1}/{2} {3} bytes", existed ? "OLD" : "NEW", realm, hash, size, elapsed));
 
@@ -53,6 +58,7 @@ namespace Lokad.ContentAddr.Tests
             try { PersistContainer.DeleteIfExists(); } catch { }
             try { StagingContainer.DeleteIfExists(); } catch { }
             try { ArchiveContainer.DeleteIfExists(); } catch { }
+            try { DeletedContainer.DeleteIfExists(); } catch { }
         }
 
         [Fact]
@@ -191,8 +197,9 @@ namespace Lokad.ContentAddr.Tests
             var persistContainer = Client.GetBlobContainerClient("contentdisposition-persist");
             var stagingContainer = Client.GetBlobContainerClient("contentdisposition-staging");
             var archiveContainer = Client.GetBlobContainerClient("contentdisposition-archive");
+            var deletedContainer = Client.GetBlobContainerClient("contentdisposition-deleted");
 
-            var store = new AzureStore("a", persistContainer, stagingContainer, archiveContainer);
+            var store = new AzureStore("a", persistContainer, stagingContainer, archiveContainer, deletedContainer);
 
             var blob = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
             var url = await blob.GetDownloadUrlAsync(
@@ -204,6 +211,89 @@ namespace Lokad.ContentAddr.Tests
 
             Assert.Contains(".blob.core.windows.net/contentdisposition-persist/a/B2EA9F7FCEA831A4A63B213F41A8855B", url.ToString());
             Assert.Contains(attach, url.ToString());
+        }
+
+        [Fact]
+        public async Task delete_file_with_reason()
+        {
+            var file = FakeFile(1024);
+            var hash = Md5(file);
+            var store = (AzureStore)WriteStore;
+
+            Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", hash.ToString());
+
+            // write
+            var r = await store.WriteAsync(file, CancellationToken.None);
+            Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", r.Hash.ToString());
+            Assert.Equal(1024, r.Size);
+
+            var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+            var aBlob = await a.GetBlob();
+
+            Assert.Equal("a/B2EA9F7FCEA831A4A63B213F41A8855B", aBlob.Name);
+            Assert.True(await a.ExistsAsync(CancellationToken.None));
+
+            Assert.Equal(1024, aBlob.GetProperties()?.Value?.ContentLength);
+
+            var url = (await a.GetDownloadUrlAsync(
+                TimeSpan.FromMinutes(20),
+                "test.bin",
+                "application/octet-stream",
+                CancellationToken.None)).ToString();
+
+            var prefix = PersistContainer.Uri + "/a/B2EA9F7FCEA831A4A63B213F41A8855B";
+            Assert.Equal(prefix, url.Substring(0, prefix.Length));
+
+            var suffix = "&sp=r&rscd=attachment%3Bfilename%3D\"test.bin\"&rsct=application%2Foctet-stream&sig=";
+            Assert.Equal(suffix, url.Substring(url.IndexOf(suffix), suffix.Length));
+
+            // delete
+            await store.DeleteWithReasonAsync(hash, AzureDeletedBlobInfo.Gdpr, CancellationToken.None);
+            Assert.False(await a.ExistsAsync(CancellationToken.None));
+
+            bool thrown = false;
+            try
+            {
+                await a.GetDownloadUrlAsync(
+                    TimeSpan.FromMinutes(20),
+                    "test.bin",
+                    "application/octet-stream",
+                    CancellationToken.None);
+            }
+            catch (AzureDeletedBlobException e)
+            {
+                Assert.Equal(1024, e.AzureDeletedBlobInfo.Size);
+                Assert.Equal(AzureDeletedBlobInfo.Gdpr, e.AzureDeletedBlobInfo.Reason);
+                thrown = true;
+            }
+            Assert.True(thrown);
+        }
+
+        [Fact]
+        public async Task throw_no_such_blob_exception()
+        {
+            var file = FakeFile(1024);
+            var hash = Md5(file);
+            var store = (AzureStore)WriteStore;
+
+            Assert.Equal("B2EA9F7FCEA831A4A63B213F41A8855B", hash.ToString());
+
+            var a = store[new Hash("B2EA9F7FCEA831A4A63B213F41A8855B")];
+
+            bool thrown = false;
+            try
+            {
+                await a.GetDownloadUrlAsync(
+                    TimeSpan.FromMinutes(20),
+                    "test.bin",
+                    "application/octet-stream",
+                    CancellationToken.None);
+            }
+            catch (NoSuchBlobException)
+            {
+                thrown = true;
+            }
+            Assert.True(thrown);
         }
     }
 }

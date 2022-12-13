@@ -1,5 +1,9 @@
-﻿using Azure.Storage.Blobs;
+﻿using Azure;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Newtonsoft.Json;
 using System;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -49,7 +53,8 @@ namespace Lokad.ContentAddr.Azure
             CancellationToken cancel)
         {
             if (!await blob.ExistsAsync(cancel).ConfigureAwait(false))
-                throw new NoSuchBlobException(blob.Realm, blob.Hash);
+                // Handle the choice of exception
+                _ = await blob.GetSizeAsync(cancel).ConfigureAwait(false);
 
             return await blob.GetDownloadUrlAsync(
                 DateTime.UtcNow,

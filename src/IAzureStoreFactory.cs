@@ -28,7 +28,6 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> Retrieve all accounts that have blobs in stores from this factory. </summary>
         /// <remarks> Accounts are sorted in ascending order. </remarks>
         Task<IReadOnlyList<long>> GetAccountsAsync(CancellationToken cancel);
-
     }
 }
 

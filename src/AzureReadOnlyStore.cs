@@ -20,21 +20,25 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> The container where blobs are persisted. </summary>
         protected BlobContainerClient Persistent { get; }
 
+        /// <summary> The container saving the blobs deletions </summary>
+        protected BlobContainerClient Deleted { get; }
+
         /// <summary> The realm for this store. </summary>
         protected string Realm { get; }
 
         /// <see cref="IReadOnlyStore.Realm"/>
         long IReadOnlyStore.Realm => long.Parse(Realm);
 
-        public AzureReadOnlyStore(string realm, BlobContainerClient persistent)
+        public AzureReadOnlyStore(string realm, BlobContainerClient persistent, BlobContainerClient deleted)
         {
             Persistent = persistent;
             Realm = realm;
+            Deleted = deleted;
         }
 
         /// <see cref="IReadOnlyStore{TBlobRef}"/>
         public IAzureReadBlobRef this[Hash hash] =>
-            new AzureBlobRef(Realm, hash, Persistent.GetBlobClient(AzureBlobName(Realm, hash)));
+            new AzureBlobRef(Realm, hash, Persistent.GetBlobClient(AzureBlobName(Realm, hash)), Deleted);
 
         IReadBlobRef IReadOnlyStore.this[Hash hash] => this[hash];
 

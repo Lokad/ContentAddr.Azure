@@ -33,19 +33,20 @@ namespace Lokad.ContentAddr.Azure
     /// </remarks>
     public sealed class DualAzureBlobRef : IAzureReadBlobRef
     {
-
         private static readonly IDualBlobLogger Log = Tracer.Bind(() => Log);
 
         public DualAzureBlobRef(
             string realm,
             Hash hash,
             BlobClient oldBlob,
-            BlobClient newBlob)
+            BlobClient newBlob,
+            BlobContainerClient deleted)
         {
             Hash = hash;
             Realm = realm;
             OldBlob = oldBlob;
             NewBlob = newBlob;
+            Deleted = deleted;
         }
 
         /// <see cref="IReadBlobRef.Hash"/>
@@ -68,6 +69,9 @@ namespace Lokad.ContentAddr.Azure
         /// </summary>
         private AzureBlobRef _chosen;
 
+        /// <summary> The Azure Storage blob container for deleted blobs. </summary>
+        private BlobContainerClient Deleted { get; }
+
         public async Task<BlobClient> GetBlob()
         {
             var chosen = await Chosen(CancellationToken.None).ConfigureAwait(false);
@@ -82,7 +86,7 @@ namespace Lokad.ContentAddr.Azure
         private async Task<AzureBlobRef> Chosen(CancellationToken cancel)
         {
             if (_chosen != null) return _chosen;
-            _chosen = new AzureBlobRef(Realm, Hash, NewBlob);
+            _chosen = new AzureBlobRef(Realm, Hash, NewBlob, Deleted);
             if (await AzureRetry.Do(NewBlob.ExistsAsync, cancel).ConfigureAwait(false))
             {
                 var props = await AzureRetry.Do(
@@ -97,13 +101,13 @@ namespace Lokad.ContentAddr.Azure
                         {
                             Log.FailedCopy(Realm, NewBlob.Name);
                             _ = StartCopy(cancel);
-                            _chosen = new AzureBlobRef(Realm, Hash, OldBlob);
+                            _chosen = new AzureBlobRef(Realm, Hash, OldBlob, Deleted);
                         }
                         break;
                     case CopyStatus.Pending:
                         if (await AzureRetry.Do(OldBlob.ExistsAsync, cancel).ConfigureAwait(false))
                         {
-                            _chosen = new AzureBlobRef(Realm, Hash, OldBlob);
+                            _chosen = new AzureBlobRef(Realm, Hash, OldBlob, Deleted);
                         }
                         break;
                     case CopyStatus.Success:
@@ -118,7 +122,7 @@ namespace Lokad.ContentAddr.Azure
                 {
                     Log.InexistantBlob(Realm, NewBlob.Name);
                     _ = StartCopy(cancel);
-                    _chosen = new AzureBlobRef(Realm, Hash, OldBlob);
+                    _chosen = new AzureBlobRef(Realm, Hash, OldBlob, Deleted);
                 }
             }
 
@@ -127,7 +131,7 @@ namespace Lokad.ContentAddr.Azure
 
         public async Task StartCopy(CancellationToken cancel)
         {
-            var oldBlobRef = new AzureBlobRef(Realm, Hash, OldBlob);
+            var oldBlobRef = new AzureBlobRef(Realm, Hash, OldBlob, Deleted);
             if (!oldBlobRef.Blob.CanGenerateSasUri)
             {
                 // If possible, generate a download URL and use that as the copy

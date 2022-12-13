@@ -1,6 +1,8 @@
 ﻿using Azure;
 using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
+using Newtonsoft.Json;
 using System;
 using System.IO;
 using System.Linq;
@@ -18,11 +20,12 @@ namespace Lokad.ContentAddr.Azure
     /// </remarks>
     public sealed class AzureBlobRef : IAzureReadBlobRef
     {
-        public AzureBlobRef(string realm, Hash hash, BlobClient blob)
+        public AzureBlobRef(string realm, Hash hash, BlobClient blob, BlobContainerClient deleted)
         {
             Hash = hash;
             Realm = realm;
             Blob = blob;
+            Deleted = deleted;
         }
 
         /// <see cref="IReadBlobRef.Hash"/>
@@ -38,6 +41,9 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> The Azure Storage blob where the blob data is stored. </summary>
         public BlobClient Blob { get; }
 
+        /// <summary> The Azure Storage blob container for deleted blobs. </summary>
+        private BlobContainerClient Deleted { get; }
+
         /// <see cref="IReadBlobRef.ExistsAsync"/>
         public async Task<bool> ExistsAsync(CancellationToken cancel) =>
             await Blob.ExistsAsync(cancel);
@@ -51,7 +57,16 @@ namespace Lokad.ContentAddr.Azure
         {
             // If properties are not loaded yet, they will either be null or 
             // contain a length of -1.
-            var props = await Blob.GetPropertiesAsync(cancellationToken: cancel);
+            Response<BlobProperties> props;
+            try 
+            {
+                props = await Blob.GetPropertiesAsync(cancellationToken: cancel);
+            }
+            catch (RequestFailedException e) when (e.Status == 404)
+            {
+                throw await ReadDeletedBlobAsync(this.Deleted, this.Realm, this.Hash, cancel).ConfigureAwait(false);
+            }
+
             if (props != null && props.Value?.ContentLength >= 0)
                 return props.Value.ContentLength;
 
@@ -64,7 +79,7 @@ namespace Lokad.ContentAddr.Azure
             }
             catch (RequestFailedException e) when (e.Status == 404)
             {
-                throw new NoSuchBlobException(Realm, Hash);
+                throw await ReadDeletedBlobAsync(this.Deleted, this.Realm, this.Hash, cancel).ConfigureAwait(false);
             }
         }
 
@@ -188,6 +203,32 @@ namespace Lokad.ContentAddr.Azure
             if (ext == ".gz") ext = ".csv.gz";
 
             return ("data" + ext, utf8.ToString());
+        }
+
+        /// <summary>
+        /// When failing to find a blob in Persistent, we search with the same realm and hash in the blob container Deleted <see cref="IAzureStore.DeleteWithReasonAsync"/>
+        /// If we find it, it means we saved data about the blob deletion, 
+        /// A specific exception <see cref="AzureDeletedBlobException"/> that contains <see cref="AzureDeletedBlobInfo"/> is thrown
+        /// </summary>
+        /// <param name="deleted"> The blob container for deleted blobs. </param>
+        /// <param name="realm"> The blob name prefix. </param>
+        /// <param name="hash"> The hash of the archived blob to be deleted. </param>
+        /// <param name="cancel"> Cancellation token. </param>
+        /// <returns><see cref="AzureDeletedBlobException"/> or <see cref="NoSuchBlobException"/> if a blob exists in deleted. </returns>
+        public static async Task<Exception> ReadDeletedBlobAsync(BlobContainerClient deleted, string realm, Hash hash, CancellationToken cancel)
+        {
+            try
+            {
+                var blobDeleted = deleted.GetBlobClient(AzureReadOnlyStore.AzureBlobName(realm, hash));
+                BlobDownloadInfo download = await blobDeleted.DownloadAsync(cancel);
+                byte[] result = new byte[download.ContentLength];
+                await download.Content.ReadAsync(result, 0, (int)download.ContentLength, cancel);
+                return new AzureDeletedBlobException(JsonConvert.DeserializeObject<AzureDeletedBlobInfo>(Encoding.UTF8.GetString(result)), realm, hash);
+            }
+            catch (RequestFailedException e) when (e.Status == 404)
+            {
+                return new NoSuchBlobException(realm, hash);
+            }
         }
     }
 }

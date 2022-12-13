@@ -29,17 +29,21 @@ namespace Lokad.ContentAddr.Azure
         /// <summary> The container where blobs are persisted on the new version. </summary>
         protected BlobContainerClient NewPersistent { get; }
 
+        /// <summary> The container saving the blobs deletions. </summary>
+        protected BlobContainerClient Deleted { get; }
+
         /// <summary> The realm for this store. </summary>
         protected string Realm { get; }
 
         /// <see cref="IReadOnlyStore.Realm"/>
         long IReadOnlyStore.Realm => long.Parse(Realm);
 
-        public DualAzureReadOnlyStore(string realm, BlobContainerClient oldPersistent, BlobContainerClient newPersistent)
+        public DualAzureReadOnlyStore(string realm, BlobContainerClient oldPersistent, BlobContainerClient newPersistent, BlobContainerClient deleted)
         {
             OldPersistent = oldPersistent;
             NewPersistent = newPersistent;
             Realm = realm;
+            Deleted = deleted;
         }
 
         /// <see cref="IReadOnlyStore{TBlobRef}"/>
@@ -48,7 +52,8 @@ namespace Lokad.ContentAddr.Azure
                 Realm,
                 hash,
                 OldPersistent.GetBlobClient(AzureBlobName(Realm, hash)),
-                NewPersistent.GetBlobClient(AzureBlobName(Realm, hash)));
+                NewPersistent.GetBlobClient(AzureBlobName(Realm, hash)),
+                Deleted);
 
         /// <summary>
         ///     Enumerate all blobs with the provided prefix, in ascending hash order per container,

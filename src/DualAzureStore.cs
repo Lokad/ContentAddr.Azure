@@ -33,9 +33,10 @@ namespace Lokad.ContentAddr.Azure
             BlobContainerClient newPersistent,
             BlobContainerClient staging,
             BlobContainerClient archive,
-            AzureWriter.OnCommit onCommit = null) : base(realm, oldPersistent, newPersistent)
+            BlobContainerClient deleted,
+            AzureWriter.OnCommit onCommit = null) : base(realm, oldPersistent, newPersistent, deleted)
         {
-            _newStore = new AzureStore(realm, newPersistent, staging, archive, onCommit);
+            _newStore = new AzureStore(realm, newPersistent, staging, archive, deleted, onCommit);
         }
 
         /// <see cref="IStore{TBlobRef}.StartWriting"/>
@@ -61,5 +62,11 @@ namespace Lokad.ContentAddr.Azure
         /// <param name="cancel"> Cancellation token. </param>
         public Task<IAzureReadBlobRef> CommitTemporaryBlob(string name, CancellationToken cancel) =>
             _newStore.CommitTemporaryBlob(name, cancel);
+
+        /// <summary>
+        /// Not supported as it is usually generated as read-only.
+        /// </summary>
+        public Task DeleteWithReasonAsync(Hash hash, string reason, CancellationToken cancel) => 
+            throw new NotSupportedException("Blob deletion is not supported for DualAzureStore");
     }
 }

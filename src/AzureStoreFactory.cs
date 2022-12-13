@@ -1,5 +1,4 @@
-﻿using Azure;
-using Azure.Storage.Blobs;
+﻿using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using System;
 using System.Collections.Generic;
@@ -21,6 +20,9 @@ namespace Lokad.ContentAddr.Azure
 
         /// <summary> Archive blob container. </summary>
         private readonly BlobContainerClient _archive;
+
+        /// <summary> Deleted blob container. </summary>
+        private readonly BlobContainerClient _deleted;
 
         /// <summary> Container prefix, if in testing. </summary>
         private readonly string _testPrefix;
@@ -48,6 +50,7 @@ namespace Lokad.ContentAddr.Azure
             var persistName = testPrefix == null ? "persist" : testPrefix + "-persist";
             var stagingName = testPrefix == null ? "staging" : testPrefix + "-staging";
             var archiveName = testPrefix == null ? "archive" : testPrefix + "-archive";
+            var deletedName = testPrefix == null ? "deleted" : testPrefix + "-deleted";
 
             _testPrefix = testPrefix;
             BlobClient = client;
@@ -70,6 +73,10 @@ namespace Lokad.ContentAddr.Azure
                 _archive = client.GetBlobContainerClient(archiveName);
                 if (!_archive.Exists())
                     _archive.CreateIfNotExistsAsync().Wait();
+
+                _deleted = client.GetBlobContainerClient(deletedName);
+                if (!_deleted.Exists())
+                    _deleted.CreateIfNotExistsAsync().Wait();
             }
         }
 
@@ -79,7 +86,7 @@ namespace Lokad.ContentAddr.Azure
             if (_staging == null)
                 throw new InvalidOperationException("Cannot use 'ForAccount' in read-only mode.");
 
-            return new AzureStore(account.ToString(CultureInfo.InvariantCulture), _persist, _staging, _archive, OnCommit);
+            return new AzureStore(account.ToString(CultureInfo.InvariantCulture), _persist, _staging, _archive, _deleted, OnCommit);
         }
 
         /// <see cref="IStoreFactory.this"/>
@@ -91,7 +98,7 @@ namespace Lokad.ContentAddr.Azure
 
         /// <summary> A read-only store for the specified account. </summary>
         public IAzureReadOnlyStore ReadOnlyForAccount(long account) =>
-            new AzureReadOnlyStore(account.ToString(CultureInfo.InvariantCulture), _persist);
+            new AzureReadOnlyStore(account.ToString(CultureInfo.InvariantCulture), _persist, _deleted);
 
         /// <summary> Deletes all contents. Only available when testing. </summary>
         public void Delete()
@@ -101,6 +108,7 @@ namespace Lokad.ContentAddr.Azure
 
             _persist.DeleteIfExistsAsync().Wait();
             _staging.DeleteIfExistsAsync().Wait();
+            _deleted.DeleteIfExistsAsync().Wait();
         }
 
         /// <see cref="IStoreFactory.Describe"/>
