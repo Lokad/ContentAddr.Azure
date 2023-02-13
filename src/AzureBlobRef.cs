@@ -55,8 +55,6 @@ namespace Lokad.ContentAddr.Azure
         /// <see cref="IReadBlobRef.GetSizeAsync"/>
         public async Task<long> GetSizeAsync(CancellationToken cancel)
         {
-            // If properties are not loaded yet, they will either be null or 
-            // contain a length of -1.
             Response<BlobProperties> props;
             try 
             {
@@ -67,20 +65,7 @@ namespace Lokad.ContentAddr.Azure
                 throw await ReadDeletedBlobAsync(this.Deleted, this.Realm, this.Hash, cancel).ConfigureAwait(false);
             }
 
-            if (props != null && props.Value?.ContentLength >= 0)
-                return props.Value.ContentLength;
-
-            try
-            {
-                await AzureRetry.Do(
-                    c => Blob.GetPropertiesAsync(cancellationToken: c),
-                    cancel).ConfigureAwait(false);
-                return props.Value.ContentLength;
-            }
-            catch (RequestFailedException e) when (e.Status == 404)
-            {
-                throw await ReadDeletedBlobAsync(this.Deleted, this.Realm, this.Hash, cancel).ConfigureAwait(false);
-            }
+            return props.Value.ContentLength;
         }
 
         /// <see cref="IReadBlobRef.OpenAsync"/>
@@ -220,6 +205,9 @@ namespace Lokad.ContentAddr.Azure
             try
             {
                 var blobDeleted = deleted.GetBlobClient(AzureReadOnlyStore.AzureBlobName(realm, hash));
+                // [cifonelli] 'DownloadAsync' has been deprecated. Should be replaced with either
+                // 'DownloadContentAsync', 'DownloadToAsync' or 'DownloadStreamingAsync' (MS recommended 
+                // replacement).
                 BlobDownloadInfo download = await blobDeleted.DownloadAsync(cancel);
                 byte[] result = new byte[download.ContentLength];
                 await download.Content.ReadAsync(result, 0, (int)download.ContentLength, cancel);

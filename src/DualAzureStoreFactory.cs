@@ -119,27 +119,18 @@ namespace Lokad.ContentAddr.Azure
         {
             var accounts = new List<long>();
 
-            var token = default(string);
-            do
+            var result = await cbc.GetBlobsByHierarchyAsync(traits: BlobTraits.Metadata,
+                states: BlobStates.None,
+                prefix: "",
+                cancellationToken: cancel).ToListAsync().ConfigureAwait(false);
+
+            foreach (var item in result)
             {
-                var result = cbc.GetBlobsByHierarchyAsync(traits: BlobTraits.Metadata,
-                    states: BlobStates.None,
-                    prefix: "",
-                    cancellationToken: cancel)
-                    .AsPages(token);
+                if (item.IsPrefix && long.TryParse(item.Prefix.Trim('/'), out var account))
+                    accounts.Add(account);
+            }
 
-                await foreach (var page in result)
-                {
-                    foreach (var item in page.Values)
-                    {
-                        if (item.IsPrefix && long.TryParse(item.Prefix.Trim('/'), out var account))
-                            accounts.Add(account);
-                    }
-
-                    token = page.ContinuationToken;
-                }
-
-            } while (token != null);
+            accounts.Sort();
 
             return accounts;
         }

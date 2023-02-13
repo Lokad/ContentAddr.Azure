@@ -72,31 +72,20 @@ namespace Lokad.ContentAddr.Azure
 
             foreach (var persistent in new[] { OldPersistent, NewPersistent })
             {
-                var token = default(string);
-                do
+                var list = persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                    states: BlobStates.None,
+                    prefix: blobPrefix,
+                    cancellationToken: cancel);
+
+                await foreach (var bi in list)
                 {
-                    var result = persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
-                        states: BlobStates.None,
-                        prefix: blobPrefix,
-                        cancellationToken: cancel)
-                        .AsPages(token);
+                    var bname = bi.Name;
+                    if (!Hash.TryParse(bname.Substring(bname.Length - 32), out var hash)) continue;
+                    if (!(bi.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                    await foreach (var page in result)
-                    {
-                        foreach (var item in page.Values)
-                        {
-                            if (!(item is BlobItem blob)) continue;
-                            if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
-                            if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
-
-                            ++count;
-                            callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
-                        }
-
-                        token = page.ContinuationToken;
-                    }
-
-                } while (token != null);
+                    ++count;
+                    callback(hash, bi.Properties.ContentLength.Value, dto.UtcDateTime);
+                }
             }
 
             return count;

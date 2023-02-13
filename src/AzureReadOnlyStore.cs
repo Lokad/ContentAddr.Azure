@@ -67,31 +67,20 @@ namespace Lokad.ContentAddr.Azure
             var blobPrefix = $"{Realm}/{prefix:X2}";
             var count = 0;
 
-            var token = default(string);
-            do
+            var list = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+                states: BlobStates.None,
+                prefix: blobPrefix,
+                cancellationToken: cancel);
+
+            await foreach (var bi in list)
             {
-                var result = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
-                    states: BlobStates.None,
-                    prefix: blobPrefix,
-                    cancellationToken: cancel)
-                    .AsPages(token);
+                var bname = bi.Name;
+                if (!Hash.TryParse(bname.Substring(bname.Length - 32), out var hash)) continue;
+                if (!(bi.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                await foreach (var page in result)
-                {
-                    foreach (var item in page.Values)
-                    {
-                        if (!(item is BlobItem blob)) continue;
-                        if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
-                        if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
-
-                        ++count;
-                        callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
-                    }
-
-                    token = page.ContinuationToken;
-                }
-
-            } while (token != null);
+                ++count;
+                callback(hash, bi.Properties.ContentLength.Value, dto.UtcDateTime);
+            }
 
             return count;
         }
@@ -104,22 +93,22 @@ namespace Lokad.ContentAddr.Azure
 
             var token = default(string);
 
-            var result = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
+            var pages = Persistent.GetBlobsAsync(traits: BlobTraits.Metadata,
                 states: BlobStates.None,
                 prefix: blobPrefix,
                 cancellationToken: cancel)
                 .AsPages(token);
 
-            var firstPage = await result.FirstOrDefaultAsync(cancel);
-            if (firstPage.ContinuationToken != null) return false;
+            var lonePage = await pages.FirstOrDefaultAsync(cancel);
+            if (lonePage.ContinuationToken != null) return false;
 
-            foreach (var item in firstPage.Values)
+            foreach (var bi in lonePage.Values)
             {
-                if (!(item is BlobItem blob)) continue;
-                if (!Hash.TryParse(blob.Name.Substring(blob.Name.Length - 32), out var hash)) continue;
-                if (!(blob.Properties.LastModified is DateTimeOffset dto)) continue;
+                var bname = bi.Name;
+                if (!Hash.TryParse(bname.Substring(bname.Length - 32), out var hash)) continue;
+                if (!(bi.Properties.LastModified is DateTimeOffset dto)) continue;
 
-                callback(hash, blob.Properties.ContentLength.Value, dto.UtcDateTime);
+                callback(hash, bi.Properties.ContentLength.Value, dto.UtcDateTime);
             }
 
             return true;
