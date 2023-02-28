@@ -6,14 +6,14 @@
     <RuntimeIdentifiers>win</RuntimeIdentifiers>
     <OutputType>Library</OutputType>
     <Company>Lokad</Company>
-    <Copyright>Copyright © Lokad 2022</Copyright>
+    <Copyright>Copyright © Lokad 2023</Copyright>
 
-    <AssemblyVersion>3.0.4.0</AssemblyVersion>
-    <FileVersion>3.0.4</FileVersion>
+    <AssemblyVersion>3.0.5.0</AssemblyVersion>
+    <FileVersion>3.0.5</FileVersion>
     <PackageId>Lokad.ContentAddr.Azure</PackageId>
-    <PackageVersion>3.0.4</PackageVersion>
+    <PackageVersion>3.0.5</PackageVersion>
     <LangVersion>8.0</LangVersion>
-    <Version>3.0.4</Version>
+    <Version>3.0.5</Version>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageIcon>lokad.png</PackageIcon>
