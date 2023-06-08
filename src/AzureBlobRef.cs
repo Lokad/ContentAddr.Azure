@@ -202,16 +202,22 @@ namespace Lokad.ContentAddr.Azure
         /// <returns><see cref="AzureDeletedBlobException"/> or <see cref="NoSuchBlobException"/> if a blob exists in deleted. </returns>
         public static async Task<Exception> ReadDeletedBlobAsync(BlobContainerClient deleted, string realm, Hash hash, CancellationToken cancel)
         {
+            if (deleted == null)
+                return new NoSuchBlobException(realm, hash);
+
             try
             {
                 var blobDeleted = deleted.GetBlobClient(AzureReadOnlyStore.AzureBlobName(realm, hash));
-                // [cifonelli] 'DownloadAsync' has been deprecated. Should be replaced with either
-                // 'DownloadContentAsync', 'DownloadToAsync' or 'DownloadStreamingAsync' (MS recommended 
-                // replacement).
-                BlobDownloadInfo download = await blobDeleted.DownloadAsync(cancel);
-                byte[] result = new byte[download.ContentLength];
-                await download.Content.ReadAsync(result, 0, (int)download.ContentLength, cancel);
-                return new AzureDeletedBlobException(JsonConvert.DeserializeObject<AzureDeletedBlobInfo>(Encoding.UTF8.GetString(result)), realm, hash);
+
+                var download = (await blobDeleted.DownloadContentAsync(cancel)).Value;
+
+                var result = download.Content.ToArray();
+
+                return new AzureDeletedBlobException(
+                    JsonConvert.DeserializeObject<AzureDeletedBlobInfo>(
+                        Encoding.UTF8.GetString(result)),
+                    realm,
+                    hash);
             }
             catch (RequestFailedException e) when (e.Status == 404)
             {
