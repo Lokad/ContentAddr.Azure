@@ -111,6 +111,14 @@ namespace Lokad.ContentAddr.Azure
             await destinationBlobClient.SetAccessTierAsync(AccessTier.Archive, cancellationToken: cancel);
         }
 
+        /// <summary> Return true if an archived copy of the blob exists in the archive container. </summary>
+        public async Task<bool> BlobHasArchivedCopyAsync(IAzureReadBlobRef blob, CancellationToken cancel = default)
+        {
+            var sourceBlob = await blob.GetBlob();
+            var archivedBlob = Archive.GetBlobClient(sourceBlob.Name);
+            return await archivedBlob.ExistsAsync(cancel);
+        }
+
         /// <summary>
         ///     UnArchive a blob. It's a long process split into several steps. First step is to move
         ///     the archived blob to the staging container and ask for its rehydratation.
