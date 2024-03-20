@@ -107,6 +107,7 @@ namespace Lokad.ContentAddr.Azure
                 throw new InvalidOperationException("Cannot delete non-test persistent store.");
 
             _persist.DeleteIfExistsAsync().Wait();
+            _archive.DeleteIfExistsAsync().Wait();
             _staging.DeleteIfExistsAsync().Wait();
             _deleted.DeleteIfExistsAsync().Wait();
         }
