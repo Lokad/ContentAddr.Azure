@@ -132,7 +132,7 @@ namespace Lokad.ContentAddr.Azure
         public async Task StartCopy(CancellationToken cancel)
         {
             var oldBlobRef = new AzureBlobRef(Realm, Hash, OldBlob, Deleted);
-            if (!oldBlobRef.Blob.CanGenerateSasUri)
+            if (oldBlobRef.Blob.CanGenerateSasUri)
             {
                 // If possible, generate a download URL and use that as the copy
                 // source.
