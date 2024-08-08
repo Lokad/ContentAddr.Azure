@@ -61,6 +61,10 @@ namespace Lokad.ContentAddr.Azure
             {
                 await AzureStore.CopyToPersistent(Temporary, finalBlob, cancel).ConfigureAwait(false);
             }
+            catch (Exception ex)
+            {
+                throw new BlobCommitException(Temporary.Uri.ToString(), finalBlob.Uri.ToString(), ex);
+            }
             finally
             {
                 // Always delete the blob if it was created.
