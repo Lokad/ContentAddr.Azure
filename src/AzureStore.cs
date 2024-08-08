@@ -272,7 +272,22 @@ namespace Lokad.ContentAddr.Azure
         {
             // Copy the blob over.
             await AzureRetry.Do(
-                c => final.StartCopyFromUriAsync(temporary.Uri, cancellationToken: c),
+                async c => {
+                    try
+                    {
+                        await final.StartCopyFromUriAsync(
+                            temporary.Uri,
+                            destinationConditions: new BlobRequestConditions() { IfNoneMatch = ETag.All },
+                            cancellationToken: c);
+                    }
+                    catch
+                    {
+                        // If the attempt to copy failed, check if the blob already exists (created by 
+                        // someone else), in which case keep going.
+                        if (!await AzureRetry.OrFalse(async () => (await final.ExistsAsync(cancel)).Value))
+                            throw;
+                    }
+                },
                 cancel).ConfigureAwait(false);
 
             // Wait for copy to finish.
